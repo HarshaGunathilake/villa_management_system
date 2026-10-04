@@ -1,3 +1,4 @@
+import { fmtTime, toMinutes } from "./times";
 import type { Booking, BookingType, Room } from "./types";
 
 /**
@@ -10,6 +11,10 @@ import type { Booking, BookingType, Room } from "./types";
  *
  * A stay covers the nights from checkIn up to (not including) checkOut, so one
  * guest can check out on the morning another guest checks in.
+ *
+ *  Rule 5  On such a changeover day the leaving guest's check-out time must not
+ *          be later than the arriving guest's check-in time. Each booking can
+ *          have its own times; otherwise the villa's usual times apply.
  */
 
 export interface StayRequest {
@@ -17,13 +22,21 @@ export interface StayRequest {
   roomId?: string;
   checkIn: string;
   checkOut: string;
+  checkInTime?: string;
+  checkOutTime?: string;
+}
+
+/** The villa's usual check-in and check-out times. */
+export interface UsualTimes {
+  checkInTime: string;
+  checkOutTime: string;
 }
 
 export type Availability =
   | { ok: true }
   | {
       ok: false;
-      reason: "invalid_dates" | "villa_booked" | "rooms_booked" | "room_booked" | "room_disabled";
+      reason: "invalid_dates" | "villa_booked" | "rooms_booked" | "room_booked" | "room_disabled" | "late_check_out" | "early_check_in";
       title: string;
       message: string;
       conflicts: Booking[];
@@ -45,11 +58,65 @@ export function findConflicts(req: StayRequest, bookings: Booking[], ignoreId?: 
   });
 }
 
+/** Does booking `b` use the same space as the requested stay? */
+const sharesSpace = (req: StayRequest, b: Booking) => req.type === "villa" || b.type === "villa" || b.roomId === req.roomId;
+
+/**
+ * Bookings that touch the requested stay on its first or last day:
+ * `leaving` check out on the day this stay checks in, `arriving` check in on
+ * the day this stay checks out.
+ */
+export function findNeighbours(req: StayRequest, bookings: Booking[], ignoreId?: string) {
+  const near = bookings.filter((b) => isActive(b) && b.id !== ignoreId && sharesSpace(req, b));
+  return {
+    leaving: near.filter((b) => b.checkOut === req.checkIn),
+    arriving: near.filter((b) => b.checkIn === req.checkOut),
+  };
+}
+
+export const checkInTimeOf = (b: { checkInTime?: string }, usual: UsualTimes) => b.checkInTime || usual.checkInTime;
+export const checkOutTimeOf = (b: { checkOutTime?: string }, usual: UsualTimes) => b.checkOutTime || usual.checkOutTime;
+
+/** Rule 5: times on a changeover day must not cross. */
+export function checkTimes(req: StayRequest, bookings: Booking[], usual: UsualTimes, ignoreId?: string): Availability {
+  const { leaving, arriving } = findNeighbours(req, bookings, ignoreId);
+  const myOut = toMinutes(checkOutTimeOf(req, usual)) ?? 0;
+  const myIn = toMinutes(checkInTimeOf(req, usual)) ?? 0;
+
+  const next = arriving.filter((b) => (toMinutes(checkInTimeOf(b, usual)) ?? 0) < myOut);
+  if (next.length > 0) {
+    const earliest = next.map((b) => checkInTimeOf(b, usual)).sort((a, b) => (toMinutes(a) ?? 0) - (toMinutes(b) ?? 0))[0];
+    return {
+      ok: false,
+      reason: "late_check_out",
+      title: "Check-out time is too late",
+      message: `Another guest checks in that day at ${fmtTime(earliest)}. Choose a check-out time no later than that.`,
+      conflicts: next,
+    };
+  }
+
+  const prev = leaving.filter((b) => (toMinutes(checkOutTimeOf(b, usual)) ?? 0) > myIn);
+  if (prev.length > 0) {
+    const latest = prev.map((b) => checkOutTimeOf(b, usual)).sort((a, b) => (toMinutes(b) ?? 0) - (toMinutes(a) ?? 0))[0];
+    return {
+      ok: false,
+      reason: "early_check_in",
+      title: "Check-in time is too early",
+      message: `Another guest checks out that day at ${fmtTime(latest)}. Choose a check-in time no earlier than that.`,
+      conflicts: prev,
+    };
+  }
+
+  return { ok: true };
+}
+
 export function checkAvailability(
   req: StayRequest,
   bookings: Booking[],
   rooms: Room[],
   ignoreId?: string,
+  /** Pass the villa's usual times to also enforce Rule 5. */
+  usual?: UsualTimes,
 ): Availability {
   if (!req.checkIn || !req.checkOut || req.checkOut <= req.checkIn) {
     return {
@@ -75,7 +142,7 @@ export function checkAvailability(
   }
 
   const conflicts = findConflicts(req, bookings, ignoreId);
-  if (conflicts.length === 0) return { ok: true };
+  if (conflicts.length === 0) return usual ? checkTimes(req, bookings, usual, ignoreId) : { ok: true };
 
   const villaConflict = conflicts.some((b) => b.type === "villa");
 

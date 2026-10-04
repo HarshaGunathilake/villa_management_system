@@ -4,9 +4,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { checkAvailability, type Availability } from "./availability";
 import { checkLogin, clearSession, readSession, writeSession } from "./auth";
 import { todayISO } from "./dates";
-import { createSeed } from "./seed";
-import type { AppData, Booking, Expense, Guest, Room, Villa } from "./types";
-import { uid } from "./utils";
+import { DEFAULT_CHECK_IN, DEFAULT_CHECK_OUT, fmtTime, normalizeTime } from "./times";
+import { createSeed, SEED_AMENITIES } from "./seed";
+import type { Amenity, AppData, Booking, BookingExtra, Expense, Guest, Room, Villa } from "./types";
+import { extrasTotal, uid } from "./utils";
 
 const STORAGE_KEY = "villa-serenity:v1";
 
@@ -32,7 +33,10 @@ interface Store extends AppData {
   addBooking: (input: NewBooking) => SaveResult;
   updateBooking: (id: string, patch: Partial<Booking>) => SaveResult;
   checkIn: (id: string) => void;
-  checkOut: (id: string) => void;
+  /** Refuses (returns false) while the guest still owes money. */
+  checkOut: (id: string) => boolean;
+  /** Replace the amenities and items on a booking; the total moves by the difference. */
+  setBookingExtras: (id: string, extras: BookingExtra[]) => void;
   cancelBooking: (id: string) => void;
   recordPayment: (id: string, amount: number) => void;
 
@@ -44,12 +48,18 @@ interface Store extends AppData {
 
   addRoom: (room: Omit<Room, "id">) => void;
   updateRoom: (id: string, patch: Partial<Room>) => void;
+  addAmenity: (amenity: Omit<Amenity, "id">) => void;
+  updateAmenity: (id: string, patch: Partial<Amenity>) => void;
+  removeAmenity: (id: string) => void;
   updateVilla: (patch: Partial<Villa>) => void;
   resetDemo: () => void;
 
   // Panels that can be opened from anywhere
   openBookingId: string | null;
   openBooking: (id: string | null) => void;
+  /** Open a booking straight on its check-out screen. */
+  openCheckout: (id: string) => void;
+  checkoutIntent: boolean;
   openGuestId: string | null;
   openGuest: (id: string | null) => void;
   expenseFormOpen: boolean;
@@ -71,7 +81,14 @@ function load(today: string): AppData {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as AppData;
-      if (parsed?.villa && Array.isArray(parsed.bookings)) return parsed;
+      if (parsed?.villa && Array.isArray(parsed.bookings)) {
+        // Older saves kept times as free text ("2:00 PM"); keep them as 24-hour "HH:MM".
+        parsed.villa.checkInTime = normalizeTime(parsed.villa.checkInTime, DEFAULT_CHECK_IN);
+        parsed.villa.checkOutTime = normalizeTime(parsed.villa.checkOutTime, DEFAULT_CHECK_OUT);
+        // Saves from before amenities existed get the starter list.
+        if (!Array.isArray(parsed.amenities)) parsed.amenities = SEED_AMENITIES.map((a) => ({ ...a }));
+        return parsed;
+      }
     }
   } catch {
     // Private windows can block storage. The app still works, it just won't remember changes.
@@ -83,7 +100,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<AppData | null>(null);
   const [today, setToday] = useState("");
   const [signedIn, setSignedIn] = useState(false);
-  const [openBookingId, openBooking] = useState<string | null>(null);
+  const [openBookingId, setOpenBookingId] = useState<string | null>(null);
+  const [checkoutIntent, setCheckoutIntent] = useState(false);
+  const openBooking = useCallback((id: string | null) => {
+    setCheckoutIntent(false);
+    setOpenBookingId(id);
+  }, []);
+  const openCheckout = useCallback((id: string) => {
+    setCheckoutIntent(true);
+    setOpenBookingId(id);
+  }, []);
   const [openGuestId, openGuest] = useState<string | null>(null);
   const [expenseFormOpen, setExpenseFormOpen] = useState(false);
   const [guestFormOpen, setGuestFormOpen] = useState(false);
@@ -144,7 +170,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       addBooking(input) {
-        const result = checkAvailability(input, d.bookings, d.rooms);
+        const result = checkAvailability(input, d.bookings, d.rooms, undefined, d.villa);
         if (!result.ok) return result;
         const booking: Booking = { ...input, id: uid("b"), status: "confirmed", createdAt: today };
         patch((s) => ({ ...s, bookings: [...s.bookings, booking] }));
@@ -156,14 +182,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!current) throw new Error("Booking not found");
         const next = { ...current, ...change };
         if (next.type === "villa") next.roomId = undefined;
-        const result = checkAvailability(next, d.bookings, d.rooms, id);
+        const result = checkAvailability(next, d.bookings, d.rooms, id, d.villa);
         if (!result.ok) return result;
         patchBooking(id, () => next);
         return { ok: true, booking: next };
       },
 
       checkIn: (id) => patchBooking(id, (b) => ({ ...b, status: "checked_in" })),
-      checkOut: (id) => patchBooking(id, (b) => ({ ...b, status: "checked_out" })),
+      checkOut(id) {
+        const b = d.bookings.find((x) => x.id === id);
+        if (!b || b.total - b.paid > 0) return false;
+        patchBooking(id, (x) => ({ ...x, status: "checked_out", checkedOutOn: today }));
+        return true;
+      },
+      setBookingExtras: (id, extras) =>
+        patchBooking(id, (b) => ({
+          ...b,
+          extras: extras.length > 0 ? extras : undefined,
+          total: Math.max(b.total - extrasTotal(b.extras) + extrasTotal(extras), 0),
+        })),
       cancelBooking: (id) => patchBooking(id, (b) => ({ ...b, status: "cancelled" })),
       recordPayment: (id, amount) =>
         patchBooking(id, (b) => ({ ...b, paid: Math.min(b.total, Math.max(0, b.paid + amount)) })),
@@ -182,11 +219,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addRoom: (room) => patch((s) => ({ ...s, rooms: [...s.rooms, { ...room, id: uid("r") }] })),
       updateRoom: (id, change) =>
         patch((s) => ({ ...s, rooms: s.rooms.map((r) => (r.id === id ? { ...r, ...change } : r)) })),
+      addAmenity: (amenity) => patch((s) => ({ ...s, amenities: [...s.amenities, { ...amenity, id: uid("a") }] })),
+      updateAmenity: (id, change) =>
+        patch((s) => ({ ...s, amenities: s.amenities.map((a) => (a.id === id ? { ...a, ...change } : a)) })),
+      removeAmenity: (id) => patch((s) => ({ ...s, amenities: s.amenities.filter((a) => a.id !== id) })),
       updateVilla: (change) => patch((s) => ({ ...s, villa: { ...s.villa, ...change } })),
       resetDemo: () => setData(createSeed(todayISO())),
 
       openBookingId,
       openBooking,
+      openCheckout,
+      checkoutIntent,
       openGuestId,
       openGuest,
       expenseFormOpen,
@@ -198,7 +241,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toast,
       notify,
     };
-  }, [data, today, signedIn, patch, patchBooking, openBookingId, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
+  }, [data, today, signedIn, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
@@ -225,6 +268,9 @@ export function useLookups() {
         b.type === "villa" ? villa.maxGuests : roomById.get(b.roomId ?? "")?.capacity ?? 2,
       rate: (b: Pick<Booking, "type" | "roomId">) =>
         b.type === "villa" ? villa.price : roomById.get(b.roomId ?? "")?.price ?? 0,
+      /** This booking's own times if it has them, otherwise the villa's usual ones, ready to show. */
+      checkInTime: (b: Pick<Booking, "checkInTime">) => fmtTime(b.checkInTime || villa.checkInTime),
+      checkOutTime: (b: Pick<Booking, "checkOutTime">) => fmtTime(b.checkOutTime || villa.checkOutTime),
     };
   }, [guests, rooms, villa]);
 }

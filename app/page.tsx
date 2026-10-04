@@ -222,8 +222,8 @@ function QuickActions({ className }: { className?: string }) {
 }
 
 function ActivityCard({ booking, kind }: { booking: Booking; kind: "in" | "out" }) {
-  const { villa, openBooking, checkIn, checkOut, notify } = useStore();
-  const { guestName, placeName } = useLookups();
+  const { openBooking, openCheckout, checkIn, notify } = useStore();
+  const { guestName, placeName, checkInTime, checkOutTime } = useLookups();
   const name = guestName(booking.guestId);
   const done = kind === "in" ? booking.status !== "confirmed" : booking.status === "checked_out";
   const Icon = kind === "in" ? LogIn : LogOut;
@@ -235,7 +235,7 @@ function ActivityCard({ booking, kind }: { booking: Booking; kind: "in" | "out" 
       </span>
       <div className="min-w-0 flex-1 basis-40">
         <div className="text-sm text-muted">
-          {kind === "in" ? "Check-in" : "Check-out"}, {kind === "in" ? villa.checkInTime : villa.checkOutTime}
+          {kind === "in" ? "Check-in" : "Check-out"}, {kind === "in" ? checkInTime(booking) : checkOutTime(booking)}
         </div>
         <div className="truncate text-xl leading-tight font-semibold">{name}</div>
         <div className="text-muted">
@@ -254,9 +254,10 @@ function ActivityCard({ booking, kind }: { booking: Booking; kind: "in" | "out" 
           <Button
             className="flex-1 sm:flex-none"
             onClick={() => {
-              if (kind === "in") checkIn(booking.id);
-              else checkOut(booking.id);
-              notify(`${name} checked ${kind}`);
+              // Check-out goes through the bill first: extra items, then payment.
+              if (kind === "out") return openCheckout(booking.id);
+              checkIn(booking.id);
+              notify(`${name} checked in`);
             }}
           >
             {kind === "in" ? "Check in" : "Check out"}

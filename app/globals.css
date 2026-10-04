@@ -126,6 +126,20 @@ button:not(:disabled) {
   animation: sheet-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Invoices and confirmations print as a clean page: no buttons, no background. */
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    margin: 18mm;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .anim-sheet,
   .anim-fade,

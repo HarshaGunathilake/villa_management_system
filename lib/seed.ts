@@ -1,6 +1,14 @@
 import { addDays } from "./dates";
 import { PHOTOS } from "./photos";
-import type { AppData, Booking, Expense, Source } from "./types";
+import type { Amenity, AppData, Booking, Expense, Source } from "./types";
+
+export const SEED_AMENITIES: Amenity[] = [
+  { id: "a_bbq", name: "BBQ evening", price: 7500, unit: "per booking", enabled: true },
+  { id: "a_breakfast", name: "Breakfast", price: 1500, unit: "per person", enabled: true },
+  { id: "a_dinner", name: "Rice and curry dinner", price: 2500, unit: "per person", enabled: true },
+  { id: "a_pickup", name: "Airport pickup", price: 18000, unit: "per booking", enabled: true },
+  { id: "a_scooter", name: "Scooter hire", price: 3000, unit: "per day", enabled: true },
+];
 
 /**
  * Demo data for Villa Serenity. Dates are written as offsets from "today" so the
@@ -111,12 +119,13 @@ export function createSeed(today: string): AppData {
       maxGuests: 8,
       price: 45000,
       ownerName: "Harsha",
-      checkInTime: "2:00 PM",
-      checkOutTime: "11:00 AM",
+      checkInTime: "14:00",
+      checkOutTime: "11:00",
     },
     rooms,
     guests,
     bookings,
     expenses,
+    amenities: SEED_AMENITIES.map((a) => ({ ...a })),
   };
 }

@@ -24,6 +24,7 @@ export interface Villa {
   /** Price per night for the entire villa, in LKR */
   price: number;
   ownerName: string;
+  /** Usual check-in and check-out times, 24-hour "HH:MM" */
   checkInTime: string;
   checkOutTime: string;
 }
@@ -38,6 +39,29 @@ export interface Room {
   price: number;
   enabled: boolean;
   photo?: string;
+}
+
+export const AMENITY_UNITS = ["per booking", "per person", "per day"] as const;
+export type AmenityUnit = (typeof AMENITY_UNITS)[number];
+
+/** Something extra the villa offers for a charge: a BBQ, meals, an airport pickup. */
+export interface Amenity {
+  id: string;
+  name: string;
+  /** Price in LKR for one unit */
+  price: number;
+  unit: AmenityUnit;
+  enabled: boolean;
+}
+
+/** An amenity added to a booking. Name and price are copied so later changes don't rewrite old bookings. */
+export interface BookingExtra {
+  amenityId: string;
+  name: string;
+  price: number;
+  /** "each" is used for one-off items typed in by hand, such as a minibar bill */
+  unit: AmenityUnit | "each";
+  qty: number;
 }
 
 export interface Guest {
@@ -57,14 +81,21 @@ export interface Booking {
   /** ISO dates (YYYY-MM-DD). The guest sleeps every night from checkIn up to, not including, checkOut. */
   checkIn: string;
   checkOut: string;
+  /** Times agreed for this booking only ("HH:MM"). Left empty, the villa's usual times apply. */
+  checkInTime?: string;
+  checkOutTime?: string;
   adults: number;
   children: number;
   source: Source;
+  /** Amenities added to this booking. Their cost is included in `total`. */
+  extras?: BookingExtra[];
   total: number;
   paid: number;
   notes: string;
   status: BookingStatus;
   createdAt: string;
+  /** The day the guest was checked out; used as the invoice date */
+  checkedOutOn?: string;
 }
 
 export interface Expense {
@@ -83,4 +114,5 @@ export interface AppData {
   guests: Guest[];
   bookings: Booking[];
   expenses: Expense[];
+  amenities: Amenity[];
 }

@@ -10,6 +10,7 @@ const NOTES: Record<string, string> = {
   "/expenses": "Bills, cleaning, repairs",
   "/money": "Revenue, expenses and profit this month",
   "/rooms": "Names, prices and which rooms take bookings",
+  "/amenities": "Extras guests can add, like a BBQ or meals",
   "/settings": "Villa name, phone, whole-villa price",
 };
 

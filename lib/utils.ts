@@ -17,6 +17,10 @@ export function plural(n: number, word: string, pluralWord?: string) {
   return `${n} ${n === 1 ? word : pluralWord ?? `${word}s`}`;
 }
 
+export function extrasTotal(extras?: { price: number; qty: number }[]) {
+  return (extras ?? []).reduce((sum, e) => sum + e.price * e.qty, 0);
+}
+
 export function initials(name: string) {
   return name
     .split(/\s+/)

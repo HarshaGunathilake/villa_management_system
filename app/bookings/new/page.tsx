@@ -2,31 +2,34 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, BedDouble, CalendarSearch, Check, CheckCircle2, Home, Lock, Search, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, BedDouble, CalendarSearch, Check, CheckCircle2, FileText, Home, Lock, Users, X } from "lucide-react";
+import { documentHref } from "@/lib/documents";
 import { Avatar, PlaceIcon } from "@/components/booking-bits";
+import { ExtrasPicker } from "@/components/extras";
 import { emptyGuest, GuestFields, guestIsValid } from "@/components/guest-sheets";
 import { Photo } from "@/components/photo";
 import { RangeCalendar } from "@/components/range-calendar";
+import { StayTimes, type StayTimesValue } from "@/components/stay-times";
 import { Badge, PaymentBadge, StateIcons } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Chip, Field, MoneyInput, Stepper, Textarea } from "@/components/ui/field";
-import { checkAvailability, nightIsTaken, paymentStatus, type Availability } from "@/lib/availability";
+import { checkAvailability, checkTimes, nightIsTaken, paymentStatus, type Availability } from "@/lib/availability";
+import { fmtTime } from "@/lib/times";
 import { addDays, fmtDayWeek, fmtFull, fmtRange, nightsBetween } from "@/lib/dates";
 import { PHOTOS } from "@/lib/photos";
 import { useLookups, useStore } from "@/lib/store";
-import { SOURCES, type Booking, type Guest, type Source } from "@/lib/types";
-import { cn, money, plural } from "@/lib/utils";
+import { SOURCES, type Booking, type BookingExtra, type Guest, type Source } from "@/lib/types";
+import { cn, extrasTotal, money, plural } from "@/lib/utils";
 
-type Step = "type" | "dates" | "guest" | "payment" | "done";
+type Step = "type" | "dates" | "guest" | "done";
 type Mode = "villa" | "room" | "any";
 type Choice = { type: "villa" } | { type: "room"; roomId: string } | null;
 
-const STEP_ORDER: Step[] = ["type", "dates", "guest", "payment"];
+const STEP_ORDER: Step[] = ["type", "dates", "guest"];
 const STEP_TITLES: Record<Step, string> = {
   type: "What would you like to book?",
   dates: "When is the stay?",
   guest: "Who is staying?",
-  payment: "Payment and notes",
   done: "",
 };
 
@@ -51,14 +54,16 @@ export default function NewBookingPage() {
   const [checkOut, setCheckOut] = useState(initial?.checkIn ? addDays(initial.checkIn, 1) : "");
 
   const [guestId, setGuestId] = useState<string | null>(initial?.guestId ?? null);
-  const [addingGuest, setAddingGuest] = useState(false);
   const [newGuest, setNewGuest] = useState(emptyGuest);
-  const [query, setQuery] = useState("");
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
 
   const [source, setSource] = useState<Source>("Direct");
   const [customTotal, setCustomTotal] = useState<number | null>(null);
+  // A nightly price agreed for this one villa booking. The villa's usual price in settings is not touched.
+  const [villaRate, setVillaRate] = useState<number | null>(null);
+  // Amenities added to this booking (BBQ, meals...). Their cost is part of the total.
+  const [extras, setExtras] = useState<BookingExtra[]>([]);
   const [paid, setPaid] = useState(0);
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState<Booking | null>(null);
@@ -90,19 +95,22 @@ export default function NewBookingPage() {
 
   const chosenCheck = choice ? (choice.type === "villa" ? villaCheck : roomChecks.get(choice.roomId)) : null;
   const chosenOk = !!choice && !!chosenCheck && chosenCheck.ok;
-  const rate = choice ? (choice.type === "villa" ? villa.price : rooms.find((r) => r.id === choice.roomId)?.price ?? 0) : 0;
+  const usualRate = choice ? (choice.type === "villa" ? villa.price : rooms.find((r) => r.id === choice.roomId)?.price ?? 0) : 0;
+  const specialRate = choice?.type === "villa" && villaRate !== null && villaRate !== villa.price;
+  const rate = choice?.type === "villa" && villaRate !== null ? villaRate : usualRate;
   const capacity = choice ? (choice.type === "villa" ? villa.maxGuests : rooms.find((r) => r.id === choice.roomId)?.capacity ?? 2) : villa.maxGuests;
   const placeName = choice ? (choice.type === "villa" ? "Entire Villa" : rooms.find((r) => r.id === choice.roomId)?.name ?? "Room") : "";
-  const total = customTotal ?? rate * nights;
+  const extrasCost = extrasTotal(extras);
+  const total = customTotal ?? rate * nights + extrasCost;
   const balance = Math.max(total - paid, 0);
 
   const selectedGuest = guestId ? guests.find((g) => g.id === guestId) : undefined;
-  const guestReady = !!selectedGuest || (addingGuest && guestIsValid(newGuest));
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = q ? guests.filter((g) => g.name.toLowerCase().includes(q) || g.phone.replace(/\s/g, "").includes(q.replace(/\s/g, ""))) : guests;
-    return list.slice(0, 6);
-  }, [guests, query]);
+  const guestReady = !!selectedGuest || guestIsValid(newGuest);
+
+  // Times for this booking only; empty means the villa's usual times.
+  const [times, setTimes] = useState<StayTimesValue>({});
+  const stay = choice && hasDates ? { type: choice.type, roomId: choice.type === "room" ? choice.roomId : undefined, checkIn, checkOut, ...times } : null;
+  const timesOk = !stay || checkTimes(stay, bookings, villa).ok;
 
   const scope = choice?.type === "villa" || mode === "villa" ? ({ type: "villa" } as const) : ({ type: "room", roomId: choice?.type === "room" ? choice.roomId : undefined } as const);
 
@@ -116,12 +124,8 @@ export default function NewBookingPage() {
   const choose = (c: Choice) => {
     setChoice(c);
     setCustomTotal(null);
+    if (c?.type !== "villa") setVillaRate(null);
     setPaid(0);
-    const cap = c ? (c.type === "villa" ? villa.maxGuests : rooms.find((r) => r.id === c.roomId)?.capacity ?? 2) : villa.maxGuests;
-    if (adults + children > cap) {
-      setAdults(Math.min(adults, cap));
-      setChildren(0);
-    }
   };
 
   const startWith = (m: Mode) => {
@@ -139,15 +143,18 @@ export default function NewBookingPage() {
   const confirm = () => {
     if (!choice) return;
     let guest: Guest | undefined = selectedGuest;
-    if (!guest && addingGuest) {
-      guest = addGuest({
-        name: newGuest.name.trim(),
-        phone: newGuest.phone.trim(),
-        email: newGuest.email?.trim() || undefined,
-        country: newGuest.country?.trim() || undefined,
-      });
+    if (!guest && guestIsValid(newGuest)) {
+      // A phone number that is already on file means a returning guest, so their history stays together.
+      const digits = (v: string) => v.replace(/\D/g, "");
+      guest =
+        guests.find((g) => digits(g.phone).length > 5 && digits(g.phone) === digits(newGuest.phone)) ??
+        addGuest({
+          name: newGuest.name.trim(),
+          phone: newGuest.phone.trim(),
+          email: newGuest.email?.trim() || undefined,
+          country: newGuest.country?.trim() || undefined,
+        });
       setGuestId(guest.id);
-      setAddingGuest(false);
     }
     if (!guest) return;
 
@@ -157,9 +164,12 @@ export default function NewBookingPage() {
       guestId: guest.id,
       checkIn,
       checkOut,
+      checkInTime: times.checkInTime,
+      checkOutTime: times.checkOutTime,
       adults,
       children,
       source,
+      extras: extras.length > 0 ? extras : undefined,
       total,
       paid: Math.min(paid, total),
       notes: notes.trim(),
@@ -216,7 +226,10 @@ export default function NewBookingPage() {
         </div>
 
         <div className="mt-6 grid gap-3">
-          <Button size="lg" block onClick={() => router.push("/calendar")}>
+          <Button size="lg" block onClick={() => router.push(documentHref(saved.id, "confirmation"))}>
+            <FileText /> View confirmation receipt
+          </Button>
+          <Button variant="secondary" size="lg" block onClick={() => router.push("/calendar")}>
             See it on the calendar
           </Button>
           <div className="grid grid-cols-2 gap-3">
@@ -340,17 +353,12 @@ export default function NewBookingPage() {
           {/* Entire villa only */}
           {mode === "villa" && hasDates && villaCheck ? (
             villaCheck.ok ? (
-              <div className="rounded-card border border-sage/40 bg-sage-soft p-5">
-                <div className="flex items-center gap-2 text-lg font-semibold text-sage-deep">
-                  <CheckCircle2 className="size-6" /> The villa is free
-                </div>
-                <div className="mt-3 flex items-baseline justify-between">
-                  <span>
-                    {plural(nights, "night")} at {money(villa.price)}
-                  </span>
-                  <span className="tnum text-2xl font-semibold">{money(villa.price * nights)}</span>
-                </div>
-              </div>
+              <VillaPriceCard
+                nights={nights}
+                usual={villa.price}
+                rate={villaRate}
+                onChange={(v) => { setVillaRate(v); setCustomTotal(null); setPaid(0); }}
+              />
             ) : (
               <Unavailable
                 result={villaCheck}
@@ -403,12 +411,38 @@ export default function NewBookingPage() {
               </div>
             </div>
           ) : null}
+
+          {mode === "any" && choice?.type === "villa" && hasDates && villaCheck?.ok ? (
+            <VillaPriceCard
+              nights={nights}
+              usual={villa.price}
+              rate={villaRate}
+              onChange={(v) => { setVillaRate(v); setCustomTotal(null); setPaid(0); }}
+            />
+          ) : null}
+
+          {stay && chosenOk ? <StayTimes request={stay} value={times} onChange={setTimes} /> : null}
         </div>
       ) : null}
 
       {/* Step 3 ------------------------------------------------------------ */}
-      {step === "guest" ? (
+      {step === "guest" && choice ? (
         <div className="space-y-8">
+          <div className="flex items-center gap-4 rounded-card border border-line bg-card p-5">
+            <span className="grid size-12 shrink-0 place-items-center rounded-full bg-well">
+              <PlaceIcon type={choice.type} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-lg leading-tight font-semibold">{placeName}</div>
+              <div className="text-muted">
+                {fmtDayWeek(checkIn)} to {fmtDayWeek(checkOut)}, {plural(nights, "night")}
+              </div>
+              <div className="text-muted">
+                Check-in from {fmtTime(times.checkInTime || villa.checkInTime)}, check-out by {fmtTime(times.checkOutTime || villa.checkOutTime)}
+              </div>
+            </div>
+          </div>
+
           {selectedGuest ? (
             <div className="flex items-center gap-4 rounded-card border border-ink bg-card p-5">
               <Avatar name={selectedGuest.name} />
@@ -420,54 +454,9 @@ export default function NewBookingPage() {
                 Change
               </Button>
             </div>
-          ) : addingGuest ? (
-            <div className="rounded-card border border-line bg-card p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-xl font-semibold">New guest</h2>
-                <Button variant="ghost" size="sm" onClick={() => setAddingGuest(false)}>
-                  Search instead
-                </Button>
-              </div>
-              <GuestFields value={newGuest} onChange={setNewGuest} />
-            </div>
           ) : (
-            <div>
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-muted" />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search guests by name or phone"
-                  aria-label="Search existing guest"
-                  className="min-h-14 w-full rounded-xl border border-line-strong bg-card pr-4 pl-12 text-lg placeholder:text-muted/70 focus:border-brass-deep focus:ring-2 focus:ring-brass/25 focus:outline-none"
-                />
-              </div>
-              <ul className="mt-3 divide-y divide-line overflow-hidden rounded-card border border-line bg-card">
-                {matches.map((g) => (
-                  <li key={g.id}>
-                    <button type="button" onClick={() => setGuestId(g.id)} className="flex w-full items-center gap-3 px-5 py-3.5 text-left hover:bg-sand/70">
-                      <Avatar name={g.name} className="size-10 text-sm" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{g.name}</span>
-                        <span className="block text-sm text-muted">{g.phone}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-                {matches.length === 0 ? <li className="px-5 py-4 text-muted">No guest found with that name or number.</li> : null}
-              </ul>
-              <Button
-                variant="accent"
-                size="lg"
-                block
-                className="mt-3"
-                onClick={() => {
-                  setAddingGuest(true);
-                  if (query && !/\d{3}/.test(query)) setNewGuest({ ...emptyGuest, name: query });
-                }}
-              >
-                <UserPlus /> Add new guest
-              </Button>
+            <div className="rounded-card border border-line bg-card p-5 shadow-card">
+              <GuestFields value={newGuest} onChange={setNewGuest} />
             </div>
           )}
 
@@ -476,33 +465,37 @@ export default function NewBookingPage() {
               <Users className="size-5 text-muted" /> How many guests?
             </h2>
             <p className="mb-2 text-muted">
-              {placeName} sleeps up to {capacity}.
+              {placeName} usually sleeps up to {capacity}.
             </p>
             <div className="divide-y divide-line rounded-card border border-line bg-card px-5">
-              <Stepper label="Adults" value={adults} min={1} max={capacity - children} onChange={setAdults} />
-              <Stepper label="Children" value={children} min={0} max={capacity - adults} onChange={setChildren} />
+              <Stepper label="Adults" value={adults} min={1} onChange={setAdults} />
+              <Stepper label="Children" value={children} min={0} onChange={setChildren} />
             </div>
+            {adults + children > capacity ? (
+              <p className="mt-2 text-[0.9375rem] text-amber-deep">
+                That is more than the usual {capacity}. You can still continue.
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <h2 className="mb-1 text-xl font-semibold">Amenities</h2>
+            <p className="mb-2 text-muted">Add anything extra the guest asked for. Leave at 0 if nothing.</p>
+            <ExtrasPicker
+              value={extras}
+              onChange={(next) => {
+                setExtras(next);
+                setCustomTotal(null);
+                setPaid(Math.min(paid, rate * nights + extrasTotal(next)));
+              }}
+            />
           </div>
         </div>
       ) : null}
 
-      {/* Step 4 ------------------------------------------------------------ */}
-      {step === "payment" && choice ? (
-        <div className="space-y-8">
-          <div className="flex items-center gap-4 rounded-card border border-line bg-card p-5">
-            <span className="grid size-12 shrink-0 place-items-center rounded-full bg-well">
-              <PlaceIcon type={choice.type} />
-            </span>
-            <div className="min-w-0">
-              <div className="text-lg leading-tight font-semibold">
-                {selectedGuest?.name ?? newGuest.name}, {placeName}
-              </div>
-              <div className="text-muted">
-                {fmtDayWeek(checkIn)} to {fmtDayWeek(checkOut)}, {plural(nights, "night")}, {plural(adults + children, "guest")}
-              </div>
-            </div>
-          </div>
-
+      {/* Step 3, continued: where it came from, payment and notes on the same screen */}
+      {step === "guest" && choice ? (
+        <div className="mt-8 space-y-8">
           <div>
             <h2 className="mb-3 text-xl font-semibold">Where did the booking come from?</h2>
             <div className="flex flex-wrap gap-2">
@@ -524,6 +517,10 @@ export default function NewBookingPage() {
                     <div className="text-sm text-muted">
                       {money(rate)} × {plural(nights, "night")}
                     </div>
+                    {extrasCost > 0 ? <div className="text-sm text-muted">Amenities {money(extrasCost)}</div> : null}
+                    {specialRate ? (
+                      <div className="text-sm text-brass-deep">Special price for this booking. Usual price {money(usualRate)} a night.</div>
+                    ) : null}
                   </div>
                   <div className="text-right">
                     <div className="tnum text-2xl font-semibold">{money(total)}</div>
@@ -533,7 +530,7 @@ export default function NewBookingPage() {
                   </div>
                 </div>
               ) : (
-                <Field label="Total" hint={`The usual price is ${money(rate * nights)}.`}>
+                <Field label="Total" hint={`The usual price is ${money(usualRate * nights + extrasCost)}.`}>
                   {(id) => <MoneyInput id={id} value={customTotal} onChange={(v) => { setCustomTotal(v); setPaid(Math.min(paid, v)); }} />}
                 </Field>
               )}
@@ -588,21 +585,84 @@ export default function NewBookingPage() {
               )}
             </div>
             {step === "dates" ? (
-              <Button size="lg" disabled={!chosenOk} onClick={() => setStep("guest")}>
-                Continue
-              </Button>
-            ) : step === "guest" ? (
-              <Button size="lg" disabled={!guestReady} onClick={() => setStep("payment")}>
+              <Button size="lg" disabled={!chosenOk || total <= 0 || !timesOk} onClick={() => setStep("guest")}>
                 Continue
               </Button>
             ) : (
-              <Button size="lg" disabled={!chosenOk || total <= 0} onClick={confirm}>
+              <Button size="lg" disabled={!guestReady || !chosenOk || total <= 0 || !timesOk} onClick={confirm}>
                 Confirm booking
               </Button>
             )}
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** "The villa is free", with the option to agree a different nightly price for this one booking. */
+function VillaPriceCard({
+  nights,
+  usual,
+  rate,
+  onChange,
+}: {
+  nights: number;
+  usual: number;
+  /** null means the usual price */
+  rate: number | null;
+  onChange: (rate: number | null) => void;
+}) {
+  const [editing, setEditing] = useState(rate !== null);
+  const effective = rate ?? usual;
+  const special = rate !== null && rate !== usual;
+
+  return (
+    <div className="rounded-card border border-sage/40 bg-sage-soft p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-lg font-semibold text-sage-deep">
+          <CheckCircle2 className="size-6" /> The villa is free
+        </div>
+        {special ? <Badge tone="brass" className="bg-white">Special price</Badge> : null}
+      </div>
+
+      <div className="mt-3 flex items-baseline justify-between gap-3">
+        <span>
+          {plural(nights, "night")} at {money(effective)}
+        </span>
+        <span className="tnum text-2xl font-semibold">{money(effective * nights)}</span>
+      </div>
+
+      {editing ? (
+        <div className="mt-4 rounded-xl bg-white/70 p-4">
+          <Field
+            label="Price per night for this booking"
+            hint={`The usual price is ${money(usual)} a night. Only this booking changes.`}
+          >
+            {(id) => <MoneyInput id={id} value={effective} onChange={(v) => onChange(v)} autoFocus />}
+          </Field>
+          {effective <= 0 ? <p className="mt-2 text-[0.9375rem] font-medium text-clay">Enter a price to continue.</p> : null}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="mt-3"
+            onClick={() => {
+              onChange(null);
+              setEditing(false);
+            }}
+          >
+            Use the usual price
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="mt-3 min-h-11 font-medium text-sage-deep underline underline-offset-4"
+        >
+          Change the price for this booking
+        </button>
+      )}
     </div>
   );
 }

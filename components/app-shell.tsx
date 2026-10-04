@@ -8,6 +8,7 @@ import {
   CalendarDays,
   Check,
   ClipboardList,
+  ConciergeBell,
   Home,
   LogOut,
   Menu,
@@ -35,6 +36,7 @@ const MORE = [
   { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/money", label: "Money", icon: Wallet },
   { href: "/rooms", label: "Rooms", icon: BedDouble },
+  { href: "/amenities", label: "Amenities", icon: ConciergeBell },
   { href: "/settings", label: "Villa settings", icon: Settings },
 ];
 
@@ -85,6 +87,18 @@ function Frame({ children }: { children: React.ReactNode }) {
       <div className="mx-auto w-full max-w-[72rem] px-4 pt-6 sm:px-8 sm:pt-10">
         <LoadingState />
       </div>
+    );
+  }
+
+  // Invoices and confirmations are shown on their own, ready to print.
+  if (pathname.startsWith("/document")) {
+    return (
+      <>
+        {children}
+        <div className="no-print">
+          <Toast message={toast} />
+        </div>
+      </>
     );
   }
 

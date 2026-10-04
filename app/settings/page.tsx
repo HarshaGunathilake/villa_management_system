@@ -4,6 +4,7 @@ import { useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { Card, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { TimeSelect } from "@/components/stay-times";
 import { Field, Input, MoneyInput, Stepper } from "@/components/ui/field";
 import { useStore } from "@/lib/store";
 
@@ -34,8 +35,8 @@ export default function SettingsPage() {
         </Field>
         <Stepper label="Maximum guests" hint="When the whole villa is booked" value={draft.maxGuests} min={1} max={30} onChange={(v) => setDraft({ ...draft, maxGuests: v })} />
         <div className="grid grid-cols-2 gap-4 border-t border-line pt-4">
-          <Field label="Check-in from">{(id) => <Input id={id} value={draft.checkInTime} onChange={set("checkInTime")} />}</Field>
-          <Field label="Check-out by">{(id) => <Input id={id} value={draft.checkOutTime} onChange={set("checkOutTime")} />}</Field>
+          <Field label="Check-in from">{(id) => <TimeSelect id={id} value={draft.checkInTime} onChange={(t) => setDraft({ ...draft, checkInTime: t })} />}</Field>
+          <Field label="Check-out by">{(id) => <TimeSelect id={id} value={draft.checkOutTime} onChange={(t) => setDraft({ ...draft, checkOutTime: t })} />}</Field>
         </div>
       </Card>
 

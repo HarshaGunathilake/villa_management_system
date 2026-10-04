@@ -32,8 +32,18 @@ All of the availability logic lives in [`lib/availability.ts`](lib/availability.
 3. Different rooms can be booked for the same dates.
 4. The same room can never be booked twice for overlapping dates.
 
+5. On a changeover day, the leaving guest's check-out time cannot be later than the
+   arriving guest's check-in time.
+
 A stay covers the nights from check-in up to (not including) check-out, so one guest can
 check out in the morning and another can check in that afternoon.
+
+Check-out goes through a final bill: extra items can be added, and a guest cannot be
+checked out while a balance remains (`checkOut` in `lib/store.tsx` refuses).
+
+Each booking can carry its own check-in and check-out times and, for the entire villa, its
+own nightly price. Both are set while making the booking and change that booking only; the
+usual times and prices stay in Villa settings.
 
 ```bash
 npm run check:rules   # proves the rules and the five prototype scenarios against the demo data
@@ -51,6 +61,9 @@ conflicting booking cannot be saved from any screen.
 | `app/bookings/new/page.tsx` | New booking in four steps, with live availability |
 | `app/calendar/page.tsx` | Visual calendar: one row for the villa, one per room |
 | `app/bookings`, `app/guests`, `app/expenses`, `app/money`, `app/rooms`, `app/settings` | The remaining pages |
+| `app/amenities/page.tsx`, `components/extras.tsx` | Amenities (BBQ, meals, pickup) and adding them to a booking |
+| `components/stay-times.tsx` | Per-booking check-in and check-out times, with same-day neighbours |
+| `app/document/page.tsx`, `lib/documents.ts` | Printable booking confirmation and invoice (print or save as PDF) |
 | `components/villa-strip.tsx` | The "villa over its rooms" availability widget |
 | `components/booking-sheet.tsx` | Booking details, check in/out, payments, edit, cancel |
 | `components/ui/*` | Small shadcn-style building blocks (button, sheet, fields, badges) |

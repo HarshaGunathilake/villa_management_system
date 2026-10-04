@@ -1,37 +1,47 @@
 "use client";
 
-import { useState } from "react";
-import { AlertCircle, ArrowRight, LogIn, LogOut, Pencil, Phone, Wallet } from "lucide-react";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { documentHref } from "@/lib/documents";
+import { AlertCircle, ArrowRight, CheckCircle2, FileText, LogIn, LogOut, Pencil, Phone, Plus, Wallet } from "lucide-react";
 import { Avatar, PlaceIcon, StatusBadge } from "@/components/booking-bits";
 import { PaymentBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Chip, Field, Input, MoneyInput, Stepper, Textarea } from "@/components/ui/field";
+import { ExtrasPicker } from "@/components/extras";
+import { StayTimes, type StayTimesValue } from "@/components/stay-times";
 import { Sheet } from "@/components/ui/sheet";
 import { bookingPhase, guestCount, paymentStatus, type Availability } from "@/lib/availability";
-import { fmtDayWeek, nightsBetween } from "@/lib/dates";
+import { fmtDayWeek, fmtRange, nightsBetween } from "@/lib/dates";
 import { useLookups, useStore } from "@/lib/store";
-import { SOURCES, type Booking } from "@/lib/types";
-import { money, plural } from "@/lib/utils";
+import { SOURCES, type Booking, type BookingExtra } from "@/lib/types";
+import { extrasTotal, money, plural, uid } from "@/lib/utils";
+
+type View = "details" | "edit" | "checkout";
 
 export function BookingSheet() {
-  const { openBookingId, openBooking, bookings } = useStore();
+  const { openBookingId, openBooking, bookings, checkoutIntent } = useStore();
   const booking = bookings.find((b) => b.id === openBookingId);
-  const [editing, setEditing] = useState(false);
+  const [chosen, setChosen] = useState<View | null>(null);
+  // Opened from a "Check out" button elsewhere, the sheet starts on the check-out screen.
+  const view: View = chosen ?? (checkoutIntent && booking?.status === "checked_in" ? "checkout" : "details");
 
   const close = (open: boolean) => {
     if (!open) {
       openBooking(null);
-      setEditing(false);
+      setChosen(null);
     }
   };
 
   return (
-    <Sheet open={!!booking} onOpenChange={close} title={editing ? "Edit booking" : "Booking"}>
+    <Sheet open={!!booking} onOpenChange={close} title={view === "edit" ? "Edit booking" : view === "checkout" ? "Check out" : "Booking"}>
       {booking ? (
-        editing ? (
-          <EditBooking key={booking.id} booking={booking} onDone={() => setEditing(false)} />
+        view === "edit" ? (
+          <EditBooking key={booking.id} booking={booking} onDone={() => setChosen("details")} />
+        ) : view === "checkout" ? (
+          <CheckOut key={booking.id} booking={booking} onDone={() => setChosen("details")} />
         ) : (
-          <BookingDetails key={booking.id} booking={booking} onEdit={() => setEditing(true)} />
+          <BookingDetails key={booking.id} booking={booking} onEdit={() => setChosen("edit")} onCheckOut={() => setChosen("checkout")} />
         )
       ) : null}
     </Sheet>
@@ -56,9 +66,14 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function BookingDetails({ booking, onEdit }: { booking: Booking; onEdit: () => void }) {
-  const { today, villa, rooms, checkIn, checkOut, cancelBooking, recordPayment, openGuest, openBooking, notify } = useStore();
-  const { guest, placeName } = useLookups();
+function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onEdit: () => void; onCheckOut: () => void }) {
+  const { today, rooms, checkIn, cancelBooking, recordPayment, openGuest, openBooking, notify } = useStore();
+  const { guest, placeName, checkInTime: inTime, checkOutTime: outTime } = useLookups();
+  const router = useRouter();
+  const openDocument = (kind: "invoice" | "confirmation") => {
+    openBooking(null);
+    router.push(documentHref(booking.id, kind));
+  };
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [paying, setPaying] = useState(false);
   const [amount, setAmount] = useState(0);
@@ -112,13 +127,13 @@ function BookingDetails({ booking, onEdit }: { booking: Booking; onEdit: () => v
           <div>
             <div className="text-sm text-muted">Check-in</div>
             <div className="font-medium">{fmtDayWeek(booking.checkIn)}</div>
-            <div className="text-sm text-muted">from {villa.checkInTime}</div>
+            <div className="text-sm text-muted">from {inTime(booking)}</div>
           </div>
           <ArrowRight className="size-5 text-line-strong" aria-hidden />
           <div className="text-right">
             <div className="text-sm text-muted">Check-out</div>
             <div className="font-medium">{fmtDayWeek(booking.checkOut)}</div>
-            <div className="text-sm text-muted">by {villa.checkOutTime}</div>
+            <div className="text-sm text-muted">by {outTime(booking)}</div>
           </div>
         </div>
         <div className="mt-3 border-t border-line pt-3 text-muted">
@@ -135,6 +150,16 @@ function BookingDetails({ booking, onEdit }: { booking: Booking; onEdit: () => v
       </Block>
 
       <Block title="Payment">
+        {booking.extras?.length ? (
+          <div className="mb-1 border-b border-line pb-1">
+            <Row label={`Stay, ${plural(nights, "night")}`}>{money(booking.total - extrasTotal(booking.extras))}</Row>
+            {booking.extras.map((e) => (
+              <Row key={e.amenityId} label={`${e.name} × ${e.qty}`}>
+                {money(e.price * e.qty)}
+              </Row>
+            ))}
+          </div>
+        ) : null}
         <Row label="Total">{money(booking.total)}</Row>
         <Row label="Paid">{money(booking.paid)}</Row>
         <div className="mt-1 flex items-center justify-between gap-4 border-t border-line pt-3">
@@ -187,6 +212,17 @@ function BookingDetails({ booking, onEdit }: { booking: Booking; onEdit: () => v
         </Block>
       ) : null}
 
+      <div className={booking.status === "checked_out" ? "grid gap-2 sm:grid-cols-2" : ""}>
+        {booking.status === "checked_out" ? (
+          <Button size="lg" block onClick={() => openDocument("invoice")}>
+            <FileText /> Invoice
+          </Button>
+        ) : null}
+        <Button variant="secondary" size="lg" block onClick={() => openDocument("confirmation")}>
+          <FileText /> Confirmation receipt
+        </Button>
+      </div>
+
       {!closed ? (
         <div className="space-y-2 pt-2">
           {canCheckIn ? (
@@ -202,14 +238,7 @@ function BookingDetails({ booking, onEdit }: { booking: Booking; onEdit: () => v
             </Button>
           ) : null}
           {canCheckOut ? (
-            <Button
-              size="lg"
-              block
-              onClick={() => {
-                checkOut(booking.id);
-                notify(`${g?.name ?? "Guest"} checked out`);
-              }}
-            >
+            <Button size="lg" block onClick={onCheckOut}>
               <LogOut /> Check out
             </Button>
           ) : null}
@@ -248,6 +277,149 @@ function BookingDetails({ booking, onEdit }: { booking: Booking; onEdit: () => v
   );
 }
 
+/**
+ * Check-out in one screen: add anything the guest had during the stay, see the
+ * final bill, take the payment. The guest cannot be checked out while a balance remains.
+ */
+function CheckOut({ booking, onDone }: { booking: Booking; onDone: () => void }) {
+  const router = useRouter();
+  const { checkOut, setBookingExtras, recordPayment, notify, openBooking } = useStore();
+  const { guestName, placeName } = useLookups();
+  const [itemName, setItemName] = useState("");
+  const [itemPrice, setItemPrice] = useState(0);
+  const [amount, setAmount] = useState<number | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const alertRef = useRef<HTMLDivElement>(null);
+
+  const name = guestName(booking.guestId);
+  const extras = booking.extras ?? [];
+  const nights = nightsBetween(booking.checkIn, booking.checkOut);
+  const balance = booking.total - booking.paid;
+  const paying = Math.min(amount ?? Math.max(balance, 0), Math.max(balance, 0));
+
+  const addItem = () => {
+    setBookingExtras(booking.id, [...extras, { amenityId: uid("x"), name: itemName.trim(), price: itemPrice, unit: "each", qty: 1 }]);
+    setItemName("");
+    setItemPrice(0);
+    setAmount(null);
+  };
+
+  const tryCheckOut = () => {
+    if (!checkOut(booking.id)) {
+      setBlocked(true);
+      requestAnimationFrame(() => alertRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }));
+      return;
+    }
+    // Checked out: close the panel and show the invoice, ready to print or send.
+    notify(`${name} checked out`);
+    onDone();
+    openBooking(null);
+    router.push(documentHref(booking.id, "invoice"));
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <Avatar name={name} />
+        <div className="min-w-0">
+          <div className="text-xl leading-tight font-semibold">{name}</div>
+          <div className="text-muted">
+            {placeName(booking)}, {fmtRange(booking.checkIn, booking.checkOut)}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-lg font-semibold">Anything to add?</h3>
+        <p className="mb-2 text-[0.9375rem] text-muted">Add what the guest asked for during the stay. The bill updates as you go.</p>
+        <ExtrasPicker
+          value={extras}
+          onChange={(next) => {
+            setBookingExtras(booking.id, next);
+            setAmount(null);
+          }}
+        />
+        <div className="mt-3 rounded-card border border-line bg-card p-4">
+          <div className="mb-2 font-medium">Something else</div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_10rem]">
+            <Input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder="e.g. Drinks, laundry" aria-label="Item name" />
+            <MoneyInput value={itemPrice} onChange={setItemPrice} aria-label="Item price" />
+          </div>
+          <Button variant="secondary" block className="mt-2" disabled={itemName.trim().length < 2 || itemPrice <= 0} onClick={addItem}>
+            <Plus /> Add to the bill
+          </Button>
+        </div>
+      </div>
+
+      <Block title="Final bill">
+        <Row label={`Stay, ${plural(nights, "night")}`}>{money(booking.total - extrasTotal(extras))}</Row>
+        {extras.map((e) => (
+          <Row key={e.amenityId} label={e.qty > 1 ? `${e.name} × ${e.qty}` : e.name}>
+            {money(e.price * e.qty)}
+          </Row>
+        ))}
+        <div className="mt-1 border-t border-line pt-1">
+          <Row label="Total">{money(booking.total)}</Row>
+          <Row label="Already paid">{money(booking.paid)}</Row>
+        </div>
+        <div className="mt-1 flex items-center justify-between gap-4 border-t border-line pt-3">
+          <span className="font-medium">{balance < 0 ? "To give back" : "Still to pay"}</span>
+          <span className="flex items-center gap-3">
+            <PaymentBadge status={paymentStatus(booking.total, booking.paid)} />
+            <span className={`tnum text-2xl font-semibold ${balance > 0 ? "text-clay" : ""}`}>{money(Math.abs(balance))}</span>
+          </span>
+        </div>
+      </Block>
+
+      {balance > 0 ? (
+        <div ref={alertRef} className={`rounded-card border p-5 ${blocked ? "border-clay/40 bg-clay-soft" : "border-line bg-card"}`}>
+          {blocked ? (
+            <div role="alert" className="mb-4 flex gap-3">
+              <AlertCircle className="mt-0.5 size-6 shrink-0 text-clay" />
+              <div>
+                <p className="text-lg font-semibold">Payment needed before check-out</p>
+                <p>
+                  {name} still has {money(balance)} to pay. Record the full payment, then check out.
+                </p>
+              </div>
+            </div>
+          ) : null}
+          <Field label="Payment received now">
+            {(id) => <MoneyInput id={id} value={paying} onChange={(v) => setAmount(Math.min(v, balance))} />}
+          </Field>
+          <Button
+            variant={blocked ? "primary" : "accent"}
+            block
+            className="mt-3"
+            disabled={paying <= 0}
+            onClick={() => {
+              recordPayment(booking.id, paying);
+              setAmount(null);
+              if (paying >= balance) setBlocked(false);
+              notify("Payment recorded");
+            }}
+          >
+            <Wallet /> Record {money(paying)}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-card border border-sage/40 bg-sage-soft p-4 font-medium text-sage-deep">
+          <CheckCircle2 className="size-6 shrink-0" /> Fully paid. Ready to check out.
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button variant="secondary" size="lg" onClick={onDone}>
+          Back
+        </Button>
+        <Button size="lg" className="flex-1" onClick={tryCheckOut}>
+          <LogOut /> Check out
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function EditBooking({ booking, onDone }: { booking: Booking; onDone: () => void }) {
   const { rooms, villa, updateBooking, notify } = useStore();
   const [place, setPlace] = useState(booking.type === "villa" ? "villa" : booking.roomId ?? "");
@@ -258,17 +430,28 @@ function EditBooking({ booking, onDone }: { booking: Booking; onDone: () => void
   const [source, setSource] = useState(booking.source);
   const [total, setTotal] = useState(booking.total);
   const [notes, setNotes] = useState(booking.notes);
+  const [times, setTimes] = useState<StayTimesValue>({ checkInTime: booking.checkInTime, checkOutTime: booking.checkOutTime });
+  const [extras, setExtras] = useState<BookingExtra[]>(booking.extras ?? []);
   const [error, setError] = useState<Extract<Availability, { ok: false }> | null>(null);
 
-  const rate = place === "villa" ? villa.price : rooms.find((r) => r.id === place)?.price ?? 0;
+  // A booking keeps its own nightly price (it may have been agreed specially) unless it moves to a different room.
+  const originalPlace = booking.type === "villa" ? "villa" : booking.roomId ?? "";
+  const originalNights = nightsBetween(booking.checkIn, booking.checkOut);
+  const rateFor = (p: string) =>
+    p === originalPlace && originalNights > 0
+      ? Math.round((booking.total - extrasTotal(booking.extras)) / originalNights)
+      : p === "villa"
+        ? villa.price
+        : rooms.find((r) => r.id === p)?.price ?? 0;
+  const rate = rateFor(place);
   const capacity = place === "villa" ? villa.maxGuests : rooms.find((r) => r.id === place)?.capacity ?? 2;
   const nights = checkIn && checkOut ? nightsBetween(checkIn, checkOut) : 0;
 
   // Keep the total in step with the nightly price whenever the room or dates change.
   const reprice = (nextPlace: string, a: string, b: string) => {
-    const r = nextPlace === "villa" ? villa.price : rooms.find((x) => x.id === nextPlace)?.price ?? 0;
+    const r = rateFor(nextPlace);
     const n = a && b ? nightsBetween(a, b) : 0;
-    if (n > 0) setTotal(r * n);
+    if (n > 0) setTotal(r * n + extrasTotal(extras));
     setError(null);
   };
 
@@ -278,9 +461,12 @@ function EditBooking({ booking, onDone }: { booking: Booking; onDone: () => void
       roomId: place === "villa" ? undefined : place,
       checkIn,
       checkOut,
+      checkInTime: times.checkInTime,
+      checkOutTime: times.checkOutTime,
       adults,
       children,
       source,
+      extras: extras.length > 0 ? extras : undefined,
       total,
       paid: Math.min(booking.paid, total),
       notes,
@@ -325,10 +511,24 @@ function EditBooking({ booking, onDone }: { booking: Booking; onDone: () => void
         </div>
       ) : null}
 
+      {nights > 0 ? (
+        <StayTimes
+          request={{ type: place === "villa" ? "villa" : "room", roomId: place === "villa" ? undefined : place, checkIn, checkOut }}
+          ignoreId={booking.id}
+          value={times}
+          onChange={(t) => { setTimes(t); setError(null); }}
+        />
+      ) : null}
+
       <div className="divide-y divide-line rounded-card border border-line bg-card px-5">
-        <Stepper label="Adults" value={adults} min={1} max={capacity - children} onChange={setAdults} />
-        <Stepper label="Children" value={children} min={0} max={capacity - adults} onChange={setChildren} />
+        <Stepper label="Adults" value={adults} min={1} onChange={setAdults} />
+        <Stepper label="Children" value={children} min={0} onChange={setChildren} />
       </div>
+      {adults + children > capacity ? (
+        <p className="-mt-3 text-[0.9375rem] text-amber-deep">
+          That is more than the usual {capacity}. You can still save it.
+        </p>
+      ) : null}
 
       <div>
         <div className="mb-2 font-medium">Where the booking came from</div>
@@ -341,7 +541,26 @@ function EditBooking({ booking, onDone }: { booking: Booking; onDone: () => void
         </div>
       </div>
 
-      <Field label="Total" hint={nights > 0 ? `${plural(nights, "night")} at ${money(rate)} is ${money(rate * nights)}. Change it if you agreed a different price.` : undefined}>
+      <div>
+        <div className="mb-2 font-medium">Amenities</div>
+        <ExtrasPicker
+          value={extras}
+          onChange={(next) => {
+            // Adding or removing an amenity moves the total by exactly its cost.
+            setTotal(Math.max(total - extrasTotal(extras) + extrasTotal(next), 0));
+            setExtras(next);
+          }}
+        />
+      </div>
+
+      <Field
+        label="Total"
+        hint={
+          nights > 0
+            ? `${plural(nights, "night")} at ${money(rate)}${extras.length > 0 ? ` plus ${money(extrasTotal(extras))} of amenities` : ""} is ${money(rate * nights + extrasTotal(extras))}. Change it if you agreed a different price.`
+            : undefined
+        }
+      >
         {(id) => <MoneyInput id={id} value={total} onChange={setTotal} />}
       </Field>
 

@@ -14,7 +14,7 @@ import { cn, money, plural } from "@/lib/utils";
  */
 export function VillaStrip({ date }: { date: string }) {
   const { bookings, rooms, villa, openBooking, today } = useStore();
-  const { guestName } = useLookups();
+  const { guestName, checkInTime, checkOutTime } = useLookups();
   const startBooking = useStartBooking();
   const { villa: villaBooking, roomBookings } = villaNight(date, bookings);
   const isToday = date === today;
@@ -106,7 +106,7 @@ export function VillaStrip({ date }: { date: string }) {
                   <span className="block text-sm text-muted">{room.name}</span>
                   <span className="block text-lg leading-tight font-semibold">{guestName(b.guestId)}</span>
                   <span className="block text-[0.9375rem] text-muted">
-                    {arriving ? `Arrives ${isToday ? "today" : fmtDay(date)}, ${villa.checkInTime}` : `Staying until ${fmtDay(b.checkOut)}`}
+                    {arriving ? `Arrives ${isToday ? "today" : fmtDay(date)}, ${checkInTime(b)}` : `Staying until ${fmtDay(b.checkOut)}`}
                   </span>
                 </span>
                 {arriving ? (
@@ -128,7 +128,7 @@ export function VillaStrip({ date }: { date: string }) {
               <span className="flex-1">
                 <span className="block text-lg leading-tight font-semibold">{room.name}</span>
                 <span className="block text-[0.9375rem] text-muted">
-                  {leaving ? `${guestName(leaving.guestId)} checks out ${villa.checkOutTime}` : `${money(room.price)} a night`}
+                  {leaving ? `${guestName(leaving.guestId)} checks out ${checkOutTime(leaving)}` : `${money(room.price)} a night`}
                 </span>
               </span>
               <Badge tone="sage" icon={StateIcons.available}>Available</Badge>

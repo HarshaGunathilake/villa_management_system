@@ -100,6 +100,41 @@ test("check-out must be after check-in", () => {
   assert.equal(!r.ok && r.reason, "invalid_dates");
 });
 
+const usual = { checkInTime: "14:00", checkOutTime: "11:00" };
+
+test("Rule 5: a late check-out cannot run into the next guest's check-in", () => {
+  // Villa Oct 13–15: Sarah leaves on the 13th (11:00), Michael arrives on the 15th (14:00)
+  const stay = { type: "villa" as const, checkIn: "2026-10-13", checkOut: "2026-10-15" };
+  assert.equal(checkAvailability(stay, data.bookings, rooms, undefined, usual).ok, true);
+  assert.equal(checkAvailability({ ...stay, checkOutTime: "13:30" }, data.bookings, rooms, undefined, usual).ok, true);
+  const late = checkAvailability({ ...stay, checkOutTime: "15:00" }, data.bookings, rooms, undefined, usual);
+  assert.equal(!late.ok && late.reason, "late_check_out");
+  assert.equal(!late.ok && late.conflicts[0].guestId, "g_michael");
+});
+
+test("Rule 5: an early check-in cannot start before the last guest has left", () => {
+  const stay = { type: "villa" as const, checkIn: "2026-10-13", checkOut: "2026-10-15" };
+  const early = checkAvailability({ ...stay, checkInTime: "09:00" }, data.bookings, rooms, undefined, usual);
+  assert.equal(!early.ok && early.reason, "early_check_in");
+  assert.equal(!early.ok && early.conflicts[0].guestId, "g_sarah");
+  assert.equal(checkAvailability({ ...stay, checkInTime: "11:00" }, data.bookings, rooms, undefined, usual).ok, true);
+});
+
+test("Rule 5: only bookings sharing the same space count as neighbours", () => {
+  // Pool View Oct 13–15: Michael arrives in Ocean View on the 15th, which does not matter here,
+  // but Sarah's whole-villa stay ending on the 13th does.
+  const stay = { type: "room" as const, roomId: "pool", checkIn: "2026-10-13", checkOut: "2026-10-15" };
+  assert.equal(checkAvailability({ ...stay, checkOutTime: "18:00" }, data.bookings, rooms, undefined, usual).ok, true);
+  const early = checkAvailability({ ...stay, checkInTime: "08:00" }, data.bookings, rooms, undefined, usual);
+  assert.equal(!early.ok && early.reason, "early_check_in");
+});
+
+test("Rule 5: the other booking's own times are respected", () => {
+  const withLateSarah = data.bookings.map((b) => (b.guestId === "g_sarah" && b.type === "villa" ? { ...b, checkOutTime: "16:00" } : b));
+  const r = checkAvailability({ type: "villa", checkIn: "2026-10-13", checkOut: "2026-10-15" }, withLateSarah, rooms, undefined, usual);
+  assert.equal(!r.ok && r.reason, "early_check_in");
+});
+
 test("monthly summary adds up", () => {
   const m = monthSummary(data, "2026-10");
   assert.equal(m.totalRoomNights, 93);
