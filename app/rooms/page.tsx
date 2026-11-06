@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Home, Pencil, Plus } from "lucide-react";
 import { Card, PageHeader } from "@/components/app-shell";
 import { Photo } from "@/components/photo";
@@ -24,6 +24,15 @@ export default function RoomsPage() {
     setDraft(room ? { name: room.name, view: room.view, capacity: room.capacity, price: room.price } : blank);
     setEditing(room ? room.id : "new");
   };
+
+  // /rooms?add=1 (from "Add rooms" elsewhere) opens the new-room form straight away.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("add") !== "1") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(blank);
+    setEditing("new");
+    window.history.replaceState(null, "", "/rooms");
+  }, []);
 
   const save = () => {
     const clean = { ...draft, name: draft.name.trim(), view: draft.view.trim() };

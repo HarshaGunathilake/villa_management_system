@@ -1,9 +1,10 @@
 "use client";
 
+import { BrandMark, Wordmark } from "@/components/brand";
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, Building2, Check, CreditCard, LayoutDashboard, LogOut, Settings, ShieldCheck, Users } from "lucide-react";
+import { Activity, BarChart3, Building2, Check, CreditCard, LayoutDashboard, LogOut, Settings, ShieldCheck } from "lucide-react";
 import { ServerUnavailable } from "@/components/access-screens";
 import { AdminProvider, useAdmin } from "@/lib/admin-store";
 import { cn } from "@/lib/utils";
@@ -12,7 +13,7 @@ const NAV = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/villas", label: "Villas", icon: Building2 },
   { href: "/admin/subscriptions", label: "Subscriptions", icon: CreditCard },
-  { href: "/admin/admins", label: "Admins", icon: Users },
+  { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/activity", label: "Activity", icon: Activity },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
@@ -64,7 +65,10 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
       {/* Sidebar: darker than the villa app, so it is always clear this is the platform side */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col bg-ink px-4 py-6 text-white lg:flex">
         <Link href="/admin" className="rounded-xl px-3 py-1">
-          <div className="text-lg leading-tight font-semibold">{data.settings.platformName}</div>
+          <div className="flex items-center gap-2.5">
+            <BrandMark variant="bare" roof="#252525" className="size-8" />
+            <Wordmark name={data.settings.platformName} className="text-lg leading-tight" accentClassName="text-[#8fd3b4]" />
+          </div>
           <div className="mt-1 inline-flex items-center gap-1.5 text-sm text-white/65">
             <ShieldCheck className="size-4" /> Super Admin
           </div>
@@ -100,7 +104,10 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-30 bg-ink text-white lg:hidden">
         <div className="flex items-center justify-between gap-3 px-4 pt-3">
           <div className="min-w-0">
-            <div className="truncate font-semibold">{data.settings.platformName}</div>
+            <div className="flex items-center gap-2">
+              <BrandMark variant="bare" roof="#252525" className="size-6" />
+              <Wordmark name={data.settings.platformName} className="truncate" accentClassName="text-[#8fd3b4]" />
+            </div>
             <div className="text-xs text-white/65">Super Admin</div>
           </div>
           <button type="button" onClick={() => void signOut()} className="grid size-11 place-items-center rounded-full hover:bg-white/10" aria-label="Sign out">

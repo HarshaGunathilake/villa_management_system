@@ -36,7 +36,8 @@ export type Availability =
   | { ok: true }
   | {
       ok: false;
-      reason: "invalid_dates" | "villa_booked" | "rooms_booked" | "room_booked" | "room_disabled" | "late_check_out" | "early_check_in";
+      /** payment_due: the villa is read-only until its subscription is paid (set by the store, not by these checks) */
+      reason: "invalid_dates" | "villa_booked" | "rooms_booked" | "room_booked" | "room_disabled" | "late_check_out" | "early_check_in" | "payment_due";
       title: string;
       message: string;
       conflicts: Booking[];

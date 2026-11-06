@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Ban, CheckCircle2, Clock3, CreditCard } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Clock3, CreditCard, Search } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BADGE_LABEL, SUBSCRIPTION_LABEL, type AccountStatus, type SubscriptionStatus, type VillaBadge } from "@/lib/admin-types";
@@ -14,6 +14,7 @@ const BADGE: Record<VillaBadge, { tone: Tone; icon: React.ComponentType<{ classN
   payment_due: { tone: "amber", icon: Clock3 },
   overdue: { tone: "clay", icon: AlertTriangle },
   disabled: { tone: "stone", icon: Ban },
+  awaiting_payment: { tone: "amber", icon: Clock3 },
 };
 
 export function VillaStatusBadge({ status }: { status: VillaBadge }) {
@@ -27,6 +28,13 @@ export function SubscriptionBadge({ status }: { status: SubscriptionStatus }) {
 export function AccessBadge({ status, labels }: { status: AccountStatus; labels?: [string, string] }) {
   const [on, off] = labels ?? ["Active", "Disabled"];
   return status === "active" ? <Badge tone="sage" icon={CheckCircle2}>{on}</Badge> : <Badge tone="stone" icon={Ban}>{off}</Badge>;
+}
+
+/** A villa's access, saying why it is off when that is because of payment. */
+export function VillaAccessBadge({ villa, labels }: { villa: { accountStatus: AccountStatus; disabledReason: "manual" | "subscription" | "unpaid" | null }; labels?: [string, string] }) {
+  if (villa.accountStatus === "disabled" && villa.disabledReason === "unpaid") return <Badge tone="amber" icon={Ban}>Awaiting first payment</Badge>;
+  if (villa.accountStatus === "disabled" && villa.disabledReason === "subscription") return <Badge tone="stone" icon={Ban}>Off, subscription ended</Badge>;
+  return <AccessBadge status={villa.accountStatus} labels={labels} />;
 }
 
 const CARD: Record<string, { label: string; tone: Tone }> = {
@@ -166,3 +174,40 @@ export function ConfirmButtons({ onCancel, onConfirm, confirmLabel, danger, busy
     </>
   );
 }
+
+/** The search field used on the admin lists. */
+export function SearchInput({ value, onChange, placeholder, label }: { value: string; onChange: (v: string) => void; placeholder: string; label: string }) {
+  return (
+    <div className="relative min-w-0 flex-1 basis-72">
+      <Search className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-muted" aria-hidden />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={label}
+        className="min-h-12 w-full rounded-xl border border-line-strong bg-card pr-4 pl-12 placeholder:text-muted/70 focus:border-brass-deep focus:ring-2 focus:ring-brass/25 focus:outline-none"
+      />
+    </div>
+  );
+}
+
+/** A plain dropdown for filters. */
+export function FilterSelect({ value, onChange, label, options, className }: { value: string; onChange: (v: string) => void; label: string; options: { value: string; label: string }[]; className?: string }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+      className={cn("min-h-12 max-w-full rounded-xl border border-line-strong bg-card px-4 font-medium focus:border-brass-deep focus:ring-2 focus:ring-brass/25 focus:outline-none", className)}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+export const CARD_LABEL = (status: string | null) => (status && CARD[status]?.label) || "Not paying by card yet";

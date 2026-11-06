@@ -6,6 +6,8 @@ import type { NextRequest } from "next/server";
  * cookie. The real checks (valid session, role, villa and user active, villa
  * ownership of every record) happen in the API routes via lib/server/auth.ts.
  */
+const PUBLIC = new Set(["/", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email", "/features", "/pricing", "/about", "/contact"]);
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -15,7 +17,8 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!request.cookies.has("vms_session") && pathname !== "/login") {
+  // The landing page, signing in, signing up and password resets are the only pages open without a session.
+  if (!request.cookies.has("vms_session") && !PUBLIC.has(pathname)) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   return NextResponse.next();

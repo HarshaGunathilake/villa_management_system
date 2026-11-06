@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  BarChart3,
   BedDouble,
   CalendarDays,
   Check,
@@ -19,17 +20,19 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { AccessDisabled, ServerUnavailable, SubscriptionEnded } from "@/components/access-screens";
+import { AccessDisabled, ServerUnavailable, SubscriptionEnded, VerifyEmail } from "@/components/access-screens";
 import { AdminApp } from "@/components/admin/admin-app";
 import { BookingSheet } from "@/components/booking-sheet";
 import { ExpenseSheet } from "@/components/expense-sheet";
 import { GuestFormSheet, GuestSheet } from "@/components/guest-sheets";
+import { GuideTour } from "@/components/guide-tour";
+import { PaymentDueBanner } from "@/components/subscription-card";
 import { Button } from "@/components/ui/button";
 import { StoreProvider, useStore, type BookingDraft } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Home", icon: Home },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/bookings", label: "Bookings", icon: ClipboardList },
   { href: "/guests", label: "Guests", icon: Users },
@@ -38,6 +41,7 @@ const NAV = [
 const MORE = [
   { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/money", label: "Money", icon: Wallet },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/rooms", label: "Rooms", icon: BedDouble },
   { href: "/amenities", label: "Amenities", icon: ConciergeBell },
   { href: "/settings", label: "Villa settings", icon: Settings },
@@ -55,8 +59,15 @@ export function useStartBooking() {
   };
 }
 
+/** The public website: no sign-in, no villa data. */
+const SITE_PAGES = new Set(["/", "/features", "/pricing", "/about", "/contact"]);
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // The public landing page: no sign-in, no villa data.
+  if (SITE_PAGES.has(pathname)) return <>{children}</>;
+  // Password reset pages work the same for villa owners and the Super Admin, signed in or not.
+  if (pathname === "/forgot-password" || pathname === "/reset-password" || pathname === "/verify-email") return <>{children}</>;
   // The Super Admin area is a separate app with its own sign-in and data. Villa data is never loaded there.
   if (pathname.startsWith("/admin")) return <AdminApp>{children}</AdminApp>;
   return (
@@ -69,19 +80,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 function Frame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { ready, villa, toast, signedIn, signOut, access, support, renewal, accessError, reload } = useStore();
+  const { ready, villa, toast, signedIn, signOut, access, support, renewal, unverifiedEmail, accessError, reload, readOnly, subscription } = useStore();
   const startBooking = useStartBooking();
-  const onLogin = pathname === "/login";
+  const onLogin = pathname === "/login" || pathname === "/register";
 
   // Nothing in the app opens without signing in first.
   useEffect(() => {
     if (access === "signed_out" && !onLogin) router.replace("/login");
-    if (signedIn && onLogin) router.replace("/");
+    if (signedIn && onLogin) router.replace("/dashboard");
   }, [access, signedIn, onLogin, router]);
 
   if (access === "error") return <ServerUnavailable message={accessError} onRetry={() => void reload()} />;
 
   // The card subscription ended: the only thing left to do is pay again.
+  // A new sign-up confirms its email first, before paying or anything else.
+  if (access === "unverified") return <VerifyEmail email={unverifiedEmail} support={support} onSignOut={signOut} onCheckAgain={reload} />;
+
   if (access === "lapsed") return <SubscriptionEnded support={support} renewal={renewal} onSignOut={signOut} onCheckAgain={reload} />;
 
   if (onLogin) {
@@ -117,19 +131,19 @@ function Frame({ children }: { children: React.ReactNode }) {
   }
 
   const inBookingFlow = pathname.startsWith("/bookings/new");
-  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const isActive = (href: string) => pathname.startsWith(href);
   const moreActive = pathname === "/more" || MORE.some((m) => isActive(m.href));
-  const showFab = ["/", "/calendar", "/bookings"].includes(pathname);
+  const showFab = ["/dashboard", "/calendar", "/bookings"].includes(pathname);
 
   return (
     <div className="min-h-dvh lg:pl-64">
       {/* Sidebar, large screens */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col overflow-y-auto border-r border-line bg-card/60 px-4 py-6 lg:flex">
-        <Link href="/" className="rounded-xl px-3 py-1">
+        <Link href="/dashboard" className="rounded-xl px-3 py-1">
           <div className="text-xl font-semibold tracking-tight">{villa.name}</div>
           <div className="text-sm text-muted">{villa.location}</div>
         </Link>
-        <Button className="mt-6" block onClick={() => startBooking()} disabled={inBookingFlow}>
+        <Button className="mt-6" block onClick={() => startBooking()} disabled={inBookingFlow} data-tour="new-booking">
           <Plus /> New booking
         </Button>
         <nav className="mt-6 flex flex-col gap-1" aria-label="Main">
@@ -137,6 +151,7 @@ function Frame({ children }: { children: React.ReactNode }) {
             <Link
               key={item.href}
               href={item.href}
+              data-tour={item.href}
               aria-current={isActive(item.href) ? "page" : undefined}
               className={cn(
                 "flex min-h-12 items-center gap-3 rounded-xl px-3 font-medium text-muted transition-colors hover:bg-well hover:text-ink",
@@ -164,13 +179,15 @@ function Frame({ children }: { children: React.ReactNode }) {
           inBookingFlow ? "pb-10" : "pb-40 lg:pb-16",
         )}
       >
+        {/* Payment due: everything stays visible, but changes are paused until it is paid. */}
+        {readOnly && subscription ? <PaymentDueBanner subscription={subscription} showLink={!pathname.startsWith("/subscription")} /> : null}
         {children}
       </main>
 
       {/* New booking, always one tap away on phones */}
       {showFab ? (
         <div className="pointer-events-none fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center px-4 lg:hidden">
-          <Button size="lg" className="pointer-events-auto shadow-float" onClick={() => startBooking()}>
+          <Button size="lg" className="pointer-events-auto shadow-float" onClick={() => startBooking()} data-tour="new-booking">
             <Plus /> New booking
           </Button>
         </div>
@@ -188,6 +205,7 @@ function Frame({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
+                data-tour={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "flex h-[4.25rem] flex-col items-center justify-center gap-1 text-[0.8125rem] font-medium text-muted",
@@ -208,6 +226,9 @@ function Frame({ children }: { children: React.ReactNode }) {
       <GuestSheet />
       <GuestFormSheet />
       <ExpenseSheet />
+
+      {/* A new owner's first visit */}
+      {!inBookingFlow ? <GuideTour /> : null}
 
       <Toast message={toast} />
     </div>

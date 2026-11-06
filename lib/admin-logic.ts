@@ -41,10 +41,13 @@ export function villaAlerts(villas: AdminVilla[], admins: AdminUser[], today: st
     const days = nightsBetween(today, v.nextPaymentDate);
     const add = (kind: VillaAlert["kind"], text: string) => alerts.push({ villaId: v.id, villaName: v.name, kind, text });
 
-    if (v.accountStatus === "disabled") add("disabled", "Access is disabled");
-    if (v.subscriptionStatus === "overdue") add("overdue", `Subscription overdue, payment was due ${days < 0 ? `${-days} days ago` : "now"}`);
+    if (v.accountStatus === "disabled") add("disabled", v.disabledReason === "unpaid" ? "Signed up, waiting for the first payment" : v.disabledReason === "subscription" ? "Card subscription ended" : "Access is disabled");
+    // A sign-up that has not paid yet has no payment dates to warn about.
+    if (v.disabledReason === "unpaid") continue;
+    if (v.card.status === "on_hold" || v.card.status === "past_due") add(v.subscriptionStatus === "overdue" ? "overdue" : "payment_due", "Card payment failed, Dodo is retrying");
+    else if (v.subscriptionStatus === "overdue") add("overdue", `Subscription overdue, payment was due ${days < 0 ? `${-days} days ago` : "now"}`);
     else if (v.subscriptionStatus === "payment_due") add("payment_due", days < 0 ? `Payment due, ${-days} days late` : "Payment due");
-    else if (days < 0) add("date_passed", `Payment date passed ${-days} ${-days === 1 ? "day" : "days"} ago and is not marked yet`);
+    else if (days < 0) add("date_passed", `Payment date passed ${-days} ${-days === 1 ? "day" : "days"} ago, no card payment yet`);
     else if (days <= DUE_SOON_DAYS) add("due_soon", days === 0 ? "Payment is due today" : `Payment due in ${days} ${days === 1 ? "day" : "days"}`);
 
     const own = admins.filter((a) => a.villaId === v.id);

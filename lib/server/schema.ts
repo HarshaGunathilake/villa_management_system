@@ -176,6 +176,43 @@ TABLES.push(
     type VARCHAR(60) NOT NULL,
     received_at DATETIME NOT NULL
   )`,
+  // Password reset links. Only a hash of the token is kept; each one works once, for an hour.
+  `CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash CHAR(64) NOT NULL PRIMARY KEY,
+    user_id VARCHAR(40) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    KEY password_resets_user (user_id),
+    CONSTRAINT password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  // One-time links that prove a new villa owner owns their email address.
+  `CREATE TABLE IF NOT EXISTS email_verifications (
+    token_hash CHAR(64) NOT NULL PRIMARY KEY,
+    user_id VARCHAR(40) NOT NULL,
+    email VARCHAR(190) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME NOT NULL,
+    KEY email_verifications_user (user_id),
+    CONSTRAINT email_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  // People who asked to hear when the site opens (the Coming soon page).
+  `CREATE TABLE IF NOT EXISTS waitlist (
+    email VARCHAR(190) NOT NULL PRIMARY KEY,
+    created_at DATETIME NOT NULL
+  )`,
+  // Every email the platform tried to send, for the Super Admin to check.
+  `CREATE TABLE IF NOT EXISTS email_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    kind VARCHAR(40) NOT NULL,
+    to_email VARCHAR(190) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    status ENUM('sent','failed','skipped') NOT NULL,
+    error VARCHAR(500) NULL,
+    villa_id VARCHAR(40) NULL,
+    created_at DATETIME NOT NULL,
+    KEY email_log_created (created_at)
+  )`,
 );
 
 /** Columns added after the first release. Existing databases get them on the next start. */
@@ -186,6 +223,10 @@ const ADDED_COLUMNS: [table: string, column: string, ddl: string][] = [
   ["villas", "dodo_subscription_id", "VARCHAR(64) NULL"],
   ["villas", "dodo_status", "VARCHAR(30) NULL"],
   ["subscription_payments", "dodo_payment_id", "VARCHAR(64) NULL"],
+  // 1 while a self sign-up has not clicked the link in its verification email. Everyone else counts as verified.
+  ["users", "email_unverified", "TINYINT(1) NOT NULL DEFAULT 0"],
+  // 1 until a new villa owner has seen (or skipped) the first-time guide. Existing owners never see it.
+  ["users", "tour_pending", "TINYINT(1) NOT NULL DEFAULT 0"],
 ];
 
 const ADDED_INDEXES: [table: string, name: string, ddl: string][] = [
@@ -204,9 +245,11 @@ async function upgrade(db: Db) {
   }
   // Villas switched off before reasons were kept were switched off by hand.
   await db.run("UPDATE villas SET disabled_reason = 'manual' WHERE account_status = 'disabled' AND disabled_reason IS NULL");
+  // The platform was renamed LankaStay. A name the Super Admin set themselves is left alone.
+  await db.run("UPDATE platform_settings SET value = 'LankaStay' WHERE name = 'platformName' AND value = 'Villa Stay Manager'");
 }
 
-export const TABLE_NAMES = ["dodo_webhook_events", "dodo_products", "amenities", "expenses", "bookings", "guests", "rooms", "platform_settings", "activity_log", "subscription_payments", "sessions", "users", "villas"];
+export const TABLE_NAMES = ["waitlist", "email_log", "email_verifications", "password_resets", "dodo_webhook_events", "dodo_products", "amenities", "expenses", "bookings", "guests", "rooms", "platform_settings", "activity_log", "subscription_payments", "sessions", "users", "villas"];
 
 export async function createSchema(db: Db) {
   for (const ddl of TABLES) await db.run(ddl);

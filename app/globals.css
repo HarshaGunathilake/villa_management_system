@@ -30,6 +30,23 @@
   --color-stone: #8f8a82;
   --color-stone-soft: #ebe8e2;
 
+  /* Public landing page (app/page.tsx): cool ground, one lagoon accent */
+  --font-display: "Space Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-lp-ground: #f3f5f4;
+  --color-lp-ink: #0e1a19;
+  --color-lp-muted: #55615f;
+  --color-lp-body: #3c4846;
+  --color-lp-line: #dde3e1;
+  --color-lp-hairline: #e8ecea;
+  --color-lp-accent: #0b5d50;
+  --color-lp-accent-deep: #08473d;
+  --color-lp-accent-soft: #dcebe7;
+  --color-lp-accent-ink: #2f4642;
+  --color-lp-night: #1b2927;
+  --color-lp-night-line: #2b3836;
+  --color-lp-night-muted: #b7c2bf;
+  --color-lp-mint: #8fd3b4;
+
   --radius-card: 1rem;
   --shadow-card: 0 1px 2px rgb(37 37 37 / 0.04);
   --shadow-float: 0 10px 30px -12px rgb(60 45 20 / 0.28);
@@ -148,5 +165,24 @@ button:not(:disabled) {
   }
   * {
     scroll-behavior: auto !important;
+  }
+}
+
+/* Public landing page: its own type, and smooth jumps to its sections. */
+.landing {
+  font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  background: var(--color-lp-ground);
+  color: var(--color-lp-ink);
+}
+html:has(.landing),
+html:has(.landing) body {
+  background: var(--color-lp-ground);
+}
+html:has(.landing) {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(.landing) {
+    scroll-behavior: auto;
   }
 }

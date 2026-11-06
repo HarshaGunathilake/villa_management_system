@@ -23,6 +23,8 @@ export const config = {
   secureCookies: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE !== "false" : process.env.NODE_ENV === "production",
   /** The site's own address, used for the page Dodo sends a villa back to after paying. Falls back to the address of the request. */
   appUrl: (process.env.APP_URL ?? "").replace(/\/+$/, ""),
+  /** Encrypts secrets kept in the database (the SMTP password). Any long random string; keep it the same once set. */
+  appSecret: process.env.APP_SECRET ?? "",
   /** Card payments for villa subscriptions. Leave DODO_PAYMENTS_API_KEY empty and card payments stay switched off. */
   dodo: {
     apiKey: process.env.DODO_PAYMENTS_API_KEY ?? "",

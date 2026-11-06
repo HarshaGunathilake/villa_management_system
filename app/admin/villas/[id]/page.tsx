@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, KeyRound, Mail, MapPin, Pencil, Phone, Plus } from "lucide-react";
+import { ArrowLeft, KeyRound, Mail, MailCheck, MailWarning, MapPin, Pencil, Phone, Plus } from "lucide-react";
 import { ActivityList } from "@/components/admin/activity-list";
-import { AccessBadge, AdminCard, CardBadge, fmtDate, fmtStamp, FormError, relativeDay, StatTile, SubscriptionBadge, TabBar, VillaStatusBadge } from "@/components/admin/ui";
+import { AccessBadge, AdminCard, CardBadge, fmtDate, fmtStamp, FormError, relativeDay, StatTile, SubscriptionBadge, TabBar, VillaAccessBadge, VillaStatusBadge } from "@/components/admin/ui";
 import { AccessModal, AdminStatusModal, AdminUserModal, EditVillaSheet, ResetPasswordModal } from "@/components/admin/villa-forms";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/field";
 import { useAdmin, useAdminData } from "@/lib/admin-store";
@@ -66,7 +67,7 @@ export default function VillaDetailPage() {
         onChange={setTab}
         tabs={[
           { id: "overview", label: "Overview" },
-          { id: "admin", label: "Admin" },
+          { id: "admin", label: "Owner login" },
           { id: "subscription", label: "Subscription" },
           { id: "activity", label: "Activity" },
         ]}
@@ -150,14 +151,22 @@ function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [resetting, setResetting] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState<AdminUser | null>(null);
+  const { act, notify } = useAdmin();
+  // For an owner who can't receive the confirmation email: you vouch for the address instead.
+  const markVerified = async (u: AdminUser) => {
+    const result = await act({ type: "markEmailVerified", id: u.id });
+    notify(result.ok ? `${u.email} marked as confirmed` : result.error);
+  };
 
   return (
     <div className="space-y-4">
       {villa.accountStatus === "disabled" ? (
         <p className="rounded-xl border border-line bg-well px-4 py-3 text-[0.9375rem]">
-          {villa.disabledReason === "subscription"
-            ? "The villa's card subscription ended, so its admins can only sign in to pay again."
-            : "The villa itself is disabled, so no admin can log in even if their own account is active."}
+          {villa.disabledReason === "unpaid"
+            ? "This villa signed up itself and has not made its first payment yet. Its admin can only sign in to pay; it opens by itself once the payment goes through."
+            : villa.disabledReason === "subscription"
+              ? "The villa's card subscription ended, so its admins can only sign in to pay again."
+              : "The villa itself is disabled, so no admin can log in even if their own account is active."}
         </p>
       ) : null}
 
@@ -170,7 +179,10 @@ function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
                 <span className="text-xl leading-tight font-semibold">{u.name}</span>
                 <AccessBadge status={u.status} />
               </div>
-              <div className="mt-1 break-all">{u.email}</div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="break-all">{u.email}</span>
+                {u.emailVerified ? null : <Badge tone="amber" icon={MailWarning}>Email not confirmed</Badge>}
+              </div>
               <div className="text-muted">{u.phone || "No phone"}</div>
               <div className="mt-2 text-sm text-muted">Last login: {fmtStamp(u.lastLoginAt)}</div>
             </div>
@@ -178,6 +190,11 @@ function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
               <Button variant="secondary" size="sm" onClick={() => setEditing(u)}>
                 <Pencil /> Edit admin
               </Button>
+              {u.emailVerified ? null : (
+                <Button variant="secondary" size="sm" onClick={() => markVerified(u)}>
+                  <MailCheck /> Mark email confirmed
+                </Button>
+              )}
               <Button variant="secondary" size="sm" onClick={() => setResetting(u)}>
                 <KeyRound /> Reset password
               </Button>
@@ -239,12 +256,13 @@ function Subscription({ villa, onAccess }: { villa: AdminVilla; onAccess: () => 
           {row("Next payment due", <>{fmtDate(villa.nextPaymentDate)} <span className="font-normal text-muted">({relativeDay(today, villa.nextPaymentDate)})</span></>)}
           {row("Subscription status", <SubscriptionBadge status={villa.subscriptionStatus} />)}
           {row("Card payments", <CardBadge status={villa.card.status} />)}
-          {row("Account access", villa.disabledReason === "subscription" ? <AccessBadge status="disabled" labels={["Active", "Off, subscription ended"]} /> : <AccessBadge status={villa.accountStatus} />)}
+          {row("Account access", <VillaAccessBadge villa={villa} />)}
           {villa.card.subscriptionId ? row("Dodo subscription", <span className="font-mono text-sm break-all">{villa.card.subscriptionId}</span>) : null}
         </dl>
         <p className="mt-3 text-sm text-muted">
-          The villa pays by card through Dodo Payments and payments are recorded here by themselves. A failed renewal only changes the payment status. When a card subscription is
-          cancelled or expires, access switches off by itself and comes back when the villa pays again. A villa you disable stays off until you enable it.
+          The villa pays by card through Dodo Payments and payments are recorded here by themselves. While the status is Payment due or Overdue (a failed renewal, or set by
+          you), the villa admin can still see everything but cannot add or change anything until it is paid. When a card subscription is cancelled or expires, access
+          switches off by itself and comes back when the villa pays again. A villa you disable stays off until you enable it.
         </p>
 
         <FormError message={error} />

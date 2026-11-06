@@ -95,7 +95,7 @@ export function GuestSheet() {
 }
 
 function GuestProfile({ guest }: { guest: Guest }) {
-  const { bookings, updateGuest, openBooking, openGuest, notify } = useStore();
+  const { bookings, updateGuest, openBooking, openGuest, notify, readOnly } = useStore();
   const { placeName } = useLookups();
   const startBooking = useStartBooking();
   const [editing, setEditing] = useState(false);
@@ -194,7 +194,7 @@ function GuestProfile({ guest }: { guest: Guest }) {
         <Button size="lg" block onClick={() => startBooking({ guestId: guest.id })}>
           <Plus /> New booking for {guest.name.split(" ")[0]}
         </Button>
-        <Button variant="secondary" size="lg" block onClick={() => setEditing(true)}>
+        <Button variant="secondary" size="lg" block disabled={readOnly} onClick={() => setEditing(true)}>
           <Pencil /> Edit details
         </Button>
       </div>

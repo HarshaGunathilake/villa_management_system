@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { AlertCircle, ShieldCheck } from "lucide-react";
+import { BrandMark } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Field, Input, PasswordInput } from "@/components/ui/field";
 import { useAdmin } from "@/lib/admin-store";
@@ -25,9 +27,12 @@ export default function AdminLoginPage() {
   return (
     <div className="grid min-h-dvh place-items-center bg-ink px-5 py-10">
       <form onSubmit={submit} className="w-full max-w-md rounded-3xl bg-sand p-6 shadow-float sm:p-9" noValidate>
-        <span className="grid size-12 place-items-center rounded-xl bg-ink text-white">
-          <ShieldCheck className="size-6" aria-hidden />
-        </span>
+        <div className="flex items-center gap-3">
+          <BrandMark className="size-12" />
+          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-muted">
+            <ShieldCheck className="size-4" aria-hidden /> Super Admin
+          </span>
+        </div>
         <h1 className="mt-5 text-[1.75rem] leading-tight font-semibold">Super Admin sign in</h1>
         <p className="mt-1 text-muted">Platform administration. Villa owners sign in on the villa page.</p>
 
@@ -56,6 +61,9 @@ export default function AdminLoginPage() {
         <Button type="submit" size="lg" block className="mt-7" disabled={!email.trim() || !password || busy}>
           {busy ? "Signing in" : "Sign in"}
         </Button>
+        <Link href="/forgot-password?portal=admin" className="mt-4 flex min-h-11 items-center justify-center font-medium text-brass-deep underline-offset-4 hover:underline">
+          Forgot your password?
+        </Link>
       </form>
     </div>
   );

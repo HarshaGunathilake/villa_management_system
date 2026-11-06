@@ -1,3 +1,4 @@
+import { queueOwnerEmails, type OwnerEmail } from "./emails";
 import type { SubscriptionStatus } from "../admin-types";
 import { addDays, fromISO, toISO } from "../dates";
 import type { VillaBilling } from "../types";
@@ -80,7 +81,8 @@ function returnUrl(request: Request, path: string) {
 export async function startCheckout(request: Request, villaId: string, admin: { email: string; name: string }): Promise<{ url: string; kind: "checkout" | "portal" }> {
   const villa = await db.one<VillaBillingRow>(`SELECT ${BILLING_COLUMNS} FROM villas WHERE id = ?`, [villaId]);
   if (!villa) throw new ApiError(404, "not_found", "Villa not found.");
-  if (villa.account_status === "disabled" && villa.disabled_reason !== "subscription") {
+  // Off because of payment (ended, or never started): paying is exactly what is allowed. Off by hand: not.
+  if (villa.account_status === "disabled" && villa.disabled_reason !== "subscription" && villa.disabled_reason !== "unpaid") {
     throw new ApiError(403, "access_disabled", "Your villa account is currently inactive.");
   }
 
@@ -158,7 +160,7 @@ async function villaFor(q: Db, subscriptionId: string | null, metadata: unknown)
 const money = (amount: number) => `LKR ${amount.toLocaleString("en-US")}`;
 
 /** Bring the villa in line with the subscription as Dodo has it now. */
-async function applySubscription(q: Db, sub: DodoSubscription, eventType: string) {
+async function applySubscription(q: Db, sub: DodoSubscription, eventType: string, outbox: OwnerEmail[]) {
   const villa = await villaFor(q, sub.subscription_id, sub.metadata);
   if (!villa) {
     console.warn("[dodo] subscription for an unknown villa", sub.subscription_id);
@@ -185,6 +187,17 @@ async function applySubscription(q: Db, sub: DodoSubscription, eventType: string
   if ((sub.status === "cancelled" || sub.status === "expired") && villa.account_status === "active") {
     await q.run("UPDATE villas SET account_status = 'disabled', disabled_reason = 'subscription', updated_at = ? WHERE id = ?", [now, villa.id]);
     await logDodo(q, villa.id, "dodo_access_off", `${villa.name} card subscription ${sub.status}, access switched off`);
+    outbox.push({ kind: "subscription_ended", villaId: villa.id });
+    return;
+  }
+  if (sub.status === "active" && villa.account_status === "disabled" && villa.disabled_reason === "unpaid") {
+    // A villa that signed up itself: the first payment opens the app. The subscription starts today.
+    await q.run("UPDATE villas SET account_status = 'active', disabled_reason = NULL, subscription_start_date = ?, updated_at = ? WHERE id = ?", [
+      isoToLocalDate(new Date().toISOString()),
+      now,
+      villa.id,
+    ]);
+    await logDodo(q, villa.id, "dodo_access_on", `${villa.name} made its first payment, access switched on`);
     return;
   }
   if (sub.status === "active" && villa.account_status === "disabled" && villa.disabled_reason === "subscription") {
@@ -203,11 +216,14 @@ async function applySubscription(q: Db, sub: DodoSubscription, eventType: string
     failed: `${villa.name} card subscription could not be set up`,
   };
   if (detail[sub.status]) await logDodo(q, villa.id, `dodo_${sub.status}`, detail[sub.status]);
+  if ((sub.status === "on_hold" || sub.status === "past_due") && villa.dodo_status !== "on_hold" && villa.dodo_status !== "past_due") {
+    outbox.push({ kind: "payment_failed", villaId: villa.id });
+  }
   else console.info("[dodo]", eventType, sub.subscription_id, sub.status);
 }
 
 /** A successful card payment becomes a payment record, once. */
-async function applyPayment(q: Db, payment: DodoPayment) {
+async function applyPayment(q: Db, payment: DodoPayment, outbox: OwnerEmail[]) {
   if (!payment.subscription_id || payment.status !== "succeeded") return;
   const villa = await villaFor(q, payment.subscription_id, payment.metadata);
   if (!villa) {
@@ -229,6 +245,7 @@ async function applyPayment(q: Db, payment: DodoPayment) {
     [`p_${payment.payment_id.slice(-24)}`.slice(0, 40), villa.id, amount, paidOn, periodStart, periodEnd, "paid", "Card payment", null, now, now, payment.payment_id],
   );
   await logDodo(q, villa.id, "dodo_payment", `${villa.name} paid ${money(amount)} by card`);
+  outbox.push({ kind: "payment_received", villaId: villa.id, amount, periodEnd });
 }
 
 function nextMonth(iso: string) {
@@ -250,13 +267,14 @@ export async function handleDodoEvent(webhookId: string, event: DodoEvent) {
   const subscription = typeof subscriptionId === "string" && subscriptionId ? await dodo.getSubscription(subscriptionId) : null;
   if (event.type.startsWith("subscription.") && !subscription) return "ignored";
 
-  return transaction(async (tx) => {
+  const outbox: OwnerEmail[] = [];
+  const result = await transaction(async (tx) => {
     const fresh = await tx.run("INSERT IGNORE INTO dodo_webhook_events (webhook_id, type, received_at) VALUES (?,?,?)", [webhookId.slice(0, 100), event.type.slice(0, 60), nowSql()]);
     if (fresh.affectedRows === 0) return "duplicate";
 
-    if (subscription) await applySubscription(tx, subscription, event.type);
+    if (subscription) await applySubscription(tx, subscription, event.type, outbox);
 
-    if (event.type === "payment.succeeded") await applyPayment(tx, event.data as unknown as DodoPayment);
+    if (event.type === "payment.succeeded") await applyPayment(tx, event.data as unknown as DodoPayment, outbox);
     else if (event.type === "payment.failed") {
       const payment = event.data as unknown as DodoPayment;
       const villa = await villaFor(tx, payment.subscription_id, payment.metadata);
@@ -264,4 +282,7 @@ export async function handleDodoEvent(webhookId: string, event: DodoEvent) {
     }
     return "handled";
   });
+  // Only once the changes are saved, so a retried webhook never emails twice.
+  if (result === "handled") queueOwnerEmails(outbox);
+  return result;
 }

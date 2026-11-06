@@ -18,6 +18,9 @@ export interface BookingDraft {
 type NewBooking = Omit<Booking, "id" | "createdAt" | "status">;
 type SaveResult = { ok: true; booking: Booking } | Extract<Availability, { ok: false }>;
 
+/** Shown when a change is tried while the subscription payment is due. The server refuses these too. */
+export const READ_ONLY_MESSAGE = "Changes are paused until your subscription payment goes through.";
+
 /**
  * Where the signed-in admin stands:
  *  loading     still asking the server
@@ -25,9 +28,10 @@ type SaveResult = { ok: true; booking: Booking } | Extract<Availability, { ok: f
  *  ok          signed in, villa and user both active
  *  disabled    the villa or the user has been switched off by the Super Admin
  *  lapsed      the card subscription ended, so access is off until the villa pays again
+ *  unverified  a new sign-up that has not confirmed its email yet
  *  error       the server or database could not be reached
  */
-export type Access = "loading" | "signed_out" | "ok" | "disabled" | "lapsed" | "error";
+export type Access = "loading" | "signed_out" | "ok" | "disabled" | "lapsed" | "unverified" | "error";
 export type SignInResult = { ok: true } | { ok: false; code: string; message: string };
 
 interface Store extends AppData {
@@ -35,6 +39,15 @@ interface Store extends AppData {
   today: string;
   /** This villa's subscription with the platform. Shown for information; only the Super Admin can change it. */
   subscription: VillaSubscription | null;
+  /**
+   * The subscription payment is due or overdue: everything can still be seen,
+   * but nothing can be added or changed until it is paid.
+   */
+  readOnly: boolean;
+  /** A new owner's first visit: show the guide */
+  tourPending: boolean;
+  /** The guide was finished or skipped; it won't show again */
+  finishTour: () => void;
 
   access: Access;
   signedIn: boolean;
@@ -42,6 +55,8 @@ interface Store extends AppData {
   support: SupportContact | null;
   /** When the subscription ended: what paying again costs */
   renewal: Renewal | null;
+  /** The address waiting to be confirmed, when access is "unverified" */
+  unverifiedEmail: string | null;
   accessError: string | null;
   signIn: (email: string, password: string, remember: boolean) => Promise<SignInResult>;
   signOut: () => void;
@@ -122,6 +137,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [support, setSupport] = useState<SupportContact | null>(null);
   const [renewal, setRenewal] = useState<Renewal | null>(null);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+  const [serverTour, setServerTour] = useState(false);
+  const [tourDone, setTourDone] = useState(false);
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const [checkoutIntent, setCheckoutIntent] = useState(false);
   const openBooking = useCallback((id: string | null) => {
@@ -139,7 +157,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // A change refused while payment is due must not be followed by "Saved".
+  const pausedAt = useRef(0);
   const notify = useCallback((message: string) => {
+    if (message !== READ_ONLY_MESSAGE && Date.now() - pausedAt.current < 1500) return;
+    if (message === READ_ONLY_MESSAGE) pausedAt.current = Date.now();
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3200);
@@ -158,6 +180,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setData(null);
       return true;
     }
+    if (failure.code === "email_unverified") {
+      setSupport(failure.support ?? null);
+      setUnverifiedEmail(failure.email ?? null);
+      setAccess("unverified");
+      setData(null);
+      return true;
+    }
     if (failure.code === "subscription_ended") {
       setSupport(failure.support ?? null);
       setRenewal(failure.renewal ?? null);
@@ -169,8 +198,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const reload = useCallback(async () => {
-    const result = await api<{ data: AppData; subscription?: VillaSubscription }>("/api/villa/data");
+    const result = await api<{ data: AppData; subscription?: VillaSubscription; tour?: boolean }>("/api/villa/data");
     if (result.ok) {
+      setServerTour(result.tour === true);
       setData(result.data);
       setSubscription(result.subscription ?? null);
       setAccessError(null);
@@ -198,7 +228,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           if (result.ok) return;
           epoch.current += 1;
           if (applyFailure(result)) return;
-          notify(result.status === 409 ? result.error : "That change could not be saved. Showing the latest saved data.");
+          notify(result.status === 409 || result.code === "payment_due" ? result.error : "That change could not be saved. Showing the latest saved data.");
           await reload();
         } finally {
           pending.current -= 1;
@@ -229,16 +259,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const store = useMemo<Store>(() => {
     const d = data ?? EMPTY;
+    const readOnly = access === "ok" && !!subscription && subscription.status !== "active";
+    /** True (and says so) when the villa is read-only, so the change is not made. */
+    const paused = () => {
+      if (readOnly) notify(READ_ONLY_MESSAGE);
+      return readOnly;
+    };
+    const pausedResult: SaveResult = { ok: false, reason: "payment_due", title: "Payment due", message: READ_ONLY_MESSAGE, conflicts: [] };
     return {
       ...d,
       ready: access !== "loading",
       today,
       subscription: access === "ok" ? subscription : null,
+      readOnly,
 
       access,
       signedIn: access === "ok" && data !== null,
       support,
       renewal,
+      unverifiedEmail,
+      tourPending: access === "ok" && serverTour && !tourDone,
+      finishTour() {
+        setTourDone(true);
+        void api("/api/villa/tour", {});
+      },
       accessError,
       reload,
       async signIn(email, password, remember) {
@@ -262,6 +306,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       addBooking(input) {
+        if (paused()) return pausedResult;
         const result = checkAvailability(input, d.bookings, d.rooms, undefined, d.villa);
         if (!result.ok) return result;
         const booking: Booking = { ...input, id: uid("b"), status: "confirmed", createdAt: today };
@@ -271,6 +316,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       updateBooking(id, change) {
+        if (paused()) return pausedResult;
         const current = d.bookings.find((b) => b.id === id);
         if (!current) throw new Error("Booking not found");
         const next = { ...current, ...change };
@@ -283,10 +329,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
 
       checkIn(id) {
+        if (paused()) return;
         patchBooking(id, (b) => ({ ...b, status: "checked_in" }));
         send({ type: "checkIn", id });
       },
       checkOut(id) {
+        if (paused()) return false;
         const b = d.bookings.find((x) => x.id === id);
         if (!b || b.total - b.paid > 0) return false;
         patchBooking(id, (x) => ({ ...x, status: "checked_out", checkedOutOn: today }));
@@ -294,6 +342,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return true;
       },
       setBookingExtras(id, extras) {
+        if (paused()) return;
         patchBooking(id, (b) => ({
           ...b,
           extras: extras.length > 0 ? extras : undefined,
@@ -302,58 +351,70 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         send({ type: "setBookingExtras", id, extras });
       },
       cancelBooking(id) {
+        if (paused()) return;
         patchBooking(id, (b) => ({ ...b, status: "cancelled" }));
         send({ type: "cancelBooking", id });
       },
       recordPayment(id, amount) {
+        if (paused()) return;
         patchBooking(id, (b) => ({ ...b, paid: Math.min(b.total, Math.max(0, b.paid + amount)) }));
         send({ type: "recordPayment", id, amount });
       },
 
       addGuest(guest) {
         const created: Guest = { ...guest, id: uid("g") };
+        if (paused()) return created; // not saved anywhere
         patch((s) => ({ ...s, guests: [...s.guests, created] }));
         send({ type: "addGuest", guest: created });
         return created;
       },
       updateGuest(id, change) {
+        if (paused()) return;
         patch((s) => ({ ...s, guests: s.guests.map((g) => (g.id === id ? { ...g, ...change } : g)) }));
         send({ type: "updateGuest", id, patch: change });
       },
 
       addExpense(expense) {
+        if (paused()) return;
         const created = { ...expense, id: uid("e") };
         patch((s) => ({ ...s, expenses: [created, ...s.expenses] }));
         send({ type: "addExpense", expense: created });
       },
       deleteExpense(id) {
+        if (paused()) return;
         patch((s) => ({ ...s, expenses: s.expenses.filter((e) => e.id !== id) }));
         send({ type: "deleteExpense", id });
       },
 
       addRoom(room) {
+        if (paused()) return;
         const created = { ...room, id: uid("r") };
         patch((s) => ({ ...s, rooms: [...s.rooms, created] }));
         send({ type: "addRoom", room: created });
       },
       updateRoom(id, change) {
+        if (paused()) return;
         patch((s) => ({ ...s, rooms: s.rooms.map((r) => (r.id === id ? { ...r, ...change } : r)) }));
         send({ type: "updateRoom", id, patch: change });
       },
       addAmenity(amenity) {
+        if (paused()) return;
         const created = { ...amenity, id: uid("a") };
         patch((s) => ({ ...s, amenities: [...s.amenities, created] }));
         send({ type: "addAmenity", amenity: created });
       },
       updateAmenity(id, change) {
+        if (paused()) return;
         patch((s) => ({ ...s, amenities: s.amenities.map((a) => (a.id === id ? { ...a, ...change } : a)) }));
         send({ type: "updateAmenity", id, patch: change });
       },
       removeAmenity(id) {
+        if (paused()) return;
         patch((s) => ({ ...s, amenities: s.amenities.filter((a) => a.id !== id) }));
         send({ type: "removeAmenity", id });
       },
       updateVilla(change) {
+        if (paused()) return;
         patch((s) => ({ ...s, villa: { ...s.villa, ...change } }));
         send({ type: "updateVilla", patch: change });
       },
@@ -373,9 +434,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toast,
       notify,
     };
-  }, [data, subscription, today, access, support, renewal, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
+  }, [data, subscription, today, access, support, renewal, unverifiedEmail, serverTour, tourDone, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+}
+
+/** True while the villa is read-only because its payment is due. False outside the villa app (the Super Admin area). */
+export function useReadOnly() {
+  return useContext(StoreContext)?.readOnly ?? false;
 }
 
 export function useStore() {

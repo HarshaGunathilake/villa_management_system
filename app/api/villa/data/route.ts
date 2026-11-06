@@ -6,5 +6,5 @@ import { loadVillaData, loadVillaSubscription } from "@/lib/server/tenant";
 export const GET = route(async () => {
   const { user, villaId } = await requireVillaAdmin();
   const [data, subscription] = await Promise.all([loadVillaData(villaId, user.name), loadVillaSubscription(villaId)]);
-  return { ok: true, user: { name: user.name, email: user.email }, data, subscription };
+  return { ok: true, user: { name: user.name, email: user.email }, data, subscription, tour: user.tourPending };
 });

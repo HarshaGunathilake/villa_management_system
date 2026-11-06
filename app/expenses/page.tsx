@@ -22,7 +22,7 @@ const ICONS: Record<ExpenseCategory, React.ComponentType<{ className?: string }>
 };
 
 export default function ExpensesPage() {
-  const { expenses, today, setExpenseFormOpen, deleteExpense, notify } = useStore();
+  const { expenses, today, setExpenseFormOpen, deleteExpense, notify, readOnly } = useStore();
   const [month, setMonth] = useState(monthKey(today));
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -73,7 +73,7 @@ export default function ExpensesPage() {
                       </div>
                     </div>
                     <div className="tnum text-lg font-semibold whitespace-nowrap">{money(e.amount)}</div>
-                    <button type="button" onClick={() => setRemoving(removing === e.id ? null : e.id)} className="-mr-2 grid size-11 place-items-center rounded-full text-muted hover:bg-well hover:text-clay" aria-label={`Delete ${e.name}`}>
+                    <button type="button" disabled={readOnly} onClick={() => setRemoving(removing === e.id ? null : e.id)} className="-mr-2 grid size-11 place-items-center rounded-full text-muted hover:bg-well hover:text-clay disabled:pointer-events-none disabled:opacity-40" aria-label={`Delete ${e.name}`}>
                       <Trash2 className="size-5" />
                     </button>
                   </div>

@@ -1,9 +1,11 @@
 "use client";
 
+import { BrandMark } from "@/components/brand";
 import { useEffect, useState } from "react";
-import { CreditCard, Loader2, Lock, Mail, Phone, RotateCw, ServerCrash } from "lucide-react";
+import { CreditCard, Loader2, Lock, Mail, MailCheck, Phone, RotateCw, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { Renewal, SupportContact } from "@/lib/api";
+import { Input } from "@/components/ui/field";
+import { api, type Renewal, type SupportContact } from "@/lib/api";
 import { cameBackFromPayment, goToPayments } from "@/lib/billing-client";
 import { money } from "@/lib/utils";
 
@@ -13,6 +15,7 @@ export function AccessDisabled({ support, onSignOut }: { support: SupportContact
   return (
     <div className="grid min-h-dvh place-items-center px-5 py-10">
       <div className="w-full max-w-md text-center">
+        <BrandMark className="mx-auto mb-8 size-10" label="LankaStay" />
         <span className="mx-auto grid size-20 place-items-center rounded-full bg-well text-ink">
           <Lock className="size-9" aria-hidden />
         </span>
@@ -57,6 +60,7 @@ export function ServerUnavailable({ message, onRetry }: { message: string | null
   return (
     <div className="grid min-h-dvh place-items-center px-5 py-10">
       <div className="w-full max-w-md text-center">
+        <BrandMark className="mx-auto mb-8 size-10" label="LankaStay" />
         <span className="mx-auto grid size-20 place-items-center rounded-full bg-clay-soft text-clay">
           <ServerCrash className="size-9" aria-hidden />
         </span>
@@ -121,11 +125,21 @@ export function SubscriptionEnded({
   return (
     <div className="grid min-h-dvh place-items-center px-5 py-10">
       <div className="w-full max-w-md text-center">
+        <BrandMark className="mx-auto mb-8 size-10" label="LankaStay" />
         <span className="mx-auto grid size-20 place-items-center rounded-full bg-amber-soft text-amber-deep">
           <CreditCard className="size-9" aria-hidden />
         </span>
-        <h1 className="mt-6 text-[1.875rem] leading-tight font-semibold sm:text-4xl">Your subscription has ended</h1>
-        <p className="mt-3 text-lg text-muted">Your bookings, guests and records are all kept. Pay to switch your villa back on straight away.</p>
+        {renewal?.firstPayment ? (
+          <>
+            <h1 className="mt-6 text-[1.875rem] leading-tight font-semibold sm:text-4xl">Start your subscription</h1>
+            <p className="mt-3 text-lg text-muted">Your account is ready. Make your first payment and your villa opens straight away, with bookings, guests and expenses in one place.</p>
+          </>
+        ) : (
+          <>
+            <h1 className="mt-6 text-[1.875rem] leading-tight font-semibold sm:text-4xl">Your subscription has ended</h1>
+            <p className="mt-3 text-lg text-muted">Your bookings, guests and records are all kept. Pay to switch your villa back on straight away.</p>
+          </>
+        )}
 
         {confirming ? (
           <p role="status" className="mt-6 flex items-center justify-center gap-2 rounded-card bg-sage-soft px-4 py-3 font-medium text-sage-deep">
@@ -142,7 +156,7 @@ export function SubscriptionEnded({
             <p className="mt-1 text-sm text-muted">Charged every month until you cancel. Payments are handled by Dodo Payments.</p>
           </div>
         ) : (
-          <p className="mt-4 text-lg text-muted">Please contact the platform administrator to restart your subscription.</p>
+          <p className="mt-4 text-lg text-muted">Card payments are not available right now. Please contact the platform administrator.</p>
         )}
 
         {error ? (
@@ -164,6 +178,114 @@ export function SubscriptionEnded({
           ) : null}
           {contact ? (
             <a href={contact} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-line-strong bg-card px-6 text-[1.0625rem] font-medium hover:bg-well">
+              Contact support
+            </a>
+          ) : null}
+          <Button variant="ghost" size="lg" onClick={onSignOut}>
+            Sign out
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A new sign-up confirms its email before anything else. Checks every few
+ * seconds, so clicking the link in another tab moves this one on by itself.
+ */
+export function VerifyEmail({ email, support, onSignOut, onCheckAgain }: { email: string | null; support: SupportContact | null; onSignOut: () => void; onCheckAgain: () => Promise<void> }) {
+  const [busy, setBusy] = useState<"resend" | "change" | "check" | null>(null);
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [changing, setChanging] = useState(false);
+  const [nextEmail, setNextEmail] = useState("");
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void onCheckAgain();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [onCheckAgain]);
+
+  const resend = async () => {
+    setBusy("resend");
+    const result = await api<{ verified?: boolean }>("/api/auth/verify", { action: "resend" });
+    setBusy(null);
+    if (!result.ok) return setMessage({ tone: "error", text: result.error });
+    if (result.verified) return void onCheckAgain();
+    setMessage({ tone: "ok", text: `A new link is on its way to ${email ?? "your inbox"}.` });
+  };
+
+  const change = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy("change");
+    const result = await api("/api/auth/verify", { action: "change", email: nextEmail.trim() });
+    setBusy(null);
+    if (!result.ok) return setMessage({ tone: "error", text: result.error });
+    setChanging(false);
+    setMessage({ tone: "ok", text: `Email changed. A link is on its way to ${nextEmail.trim()}.` });
+    await onCheckAgain();
+  };
+
+  const check = async () => {
+    setBusy("check");
+    await onCheckAgain();
+    setBusy(null);
+    setMessage({ tone: "error", text: "Not confirmed yet. Click the link in the email, then come back here." });
+  };
+
+  return (
+    <div className="grid min-h-dvh place-items-center px-5 py-10">
+      <div className="w-full max-w-md text-center">
+        <BrandMark className="mx-auto mb-8 size-10" label="LankaStay" />
+        <span className="mx-auto grid size-20 place-items-center rounded-full bg-sage-soft text-sage-deep">
+          <MailCheck className="size-9" aria-hidden />
+        </span>
+        <h1 className="mt-6 text-[1.875rem] leading-tight font-semibold sm:text-4xl">Confirm your email</h1>
+        <p className="mt-3 text-lg text-muted">
+          We sent a link to
+          <span className="my-1 block font-medium text-ink [overflow-wrap:anywhere]">{email ?? "your email"}</span>
+          Click it to open your account.
+        </p>
+        <p className="mt-2 text-muted">Can&apos;t see it? Check the spam or promotions folder.</p>
+
+        {message ? (
+          <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-xl px-4 py-3 text-left ${message.tone === "ok" ? "bg-sage-soft text-sage-deep" : "bg-clay-soft text-clay"}`}>
+            {message.text}
+          </p>
+        ) : null}
+
+        {changing ? (
+          <form onSubmit={change} className="mt-6 space-y-3 rounded-card border border-line bg-card p-5 text-left">
+            <label className="block font-medium" htmlFor="verify-new-email">
+              Your correct email
+            </label>
+            <Input id="verify-new-email" type="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={nextEmail} onChange={(e) => setNextEmail(e.target.value)} autoFocus />
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={!nextEmail.includes("@") || busy !== null}>
+                {busy === "change" ? <Loader2 className="animate-spin" /> : null} Change and send link
+              </Button>
+              <Button variant="ghost" onClick={() => setChanging(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : null}
+
+        <div className="mt-6 grid gap-3">
+          <Button size="lg" onClick={check} disabled={busy !== null}>
+            {busy === "check" ? <Loader2 className="animate-spin" /> : <RotateCw />} I&apos;ve confirmed it
+          </Button>
+          <Button variant="secondary" size="lg" onClick={resend} disabled={busy !== null}>
+            {busy === "resend" ? <Loader2 className="animate-spin" /> : <Mail />} Send the email again
+          </Button>
+          {!changing ? (
+            <Button variant="ghost" size="lg" onClick={() => { setChanging(true); setMessage(null); setNextEmail(""); }}>
+              Wrong email? Change it
+            </Button>
+          ) : null}
+          {support?.email ? (
+            <a href={`mailto:${support.email}?subject=${encodeURIComponent("Email confirmation")}`} className="min-h-11 py-2 font-medium text-brass-deep underline-offset-4 hover:underline">
               Contact support
             </a>
           ) : null}

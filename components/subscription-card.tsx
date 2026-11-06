@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, CreditCard, Loader2, Mail, Phone } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, CreditCard, Loader2, Lock, Mail, Phone } from "lucide-react";
 import { Card } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -82,6 +82,34 @@ export function SupportContact({ support }: { support: VillaSubscription["suppor
         <a href={`tel:${support.phone.replace(/\s/g, "")}`} className="flex items-center gap-2 font-medium underline-offset-4 hover:underline">
           <Phone className="size-4 shrink-0 text-muted" /> {support.phone}
         </a>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Shown on every page while the payment is due or overdue: the villa can be
+ * looked at, but nothing can be added or changed until it is paid.
+ */
+export function PaymentDueBanner({ subscription: s, showLink = true }: { subscription: VillaSubscription; showLink?: boolean }) {
+  const overdue = s.status === "overdue";
+  return (
+    <div
+      role="status"
+      className={`mb-6 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-card px-5 py-4 ${overdue ? "bg-clay-soft text-clay" : "bg-amber-soft text-amber-deep"}`}
+    >
+      <Lock className="size-5 shrink-0" />
+      <div className="min-w-0 flex-1 basis-64">
+        <p className="font-semibold">{overdue ? "Your subscription payment is overdue" : "Your subscription payment is due"}</p>
+        <p className="text-[0.9375rem]">You can still see everything, but new bookings and other changes are paused until the payment goes through.</p>
+      </div>
+      {showLink ? (
+        <Link
+          href="/subscription"
+          className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl bg-ink px-4 font-medium text-white transition-opacity hover:opacity-90"
+        >
+          <CreditCard className="size-4" /> Pay {money(s.monthlyAmount)}
+        </Link>
       ) : null}
     </div>
   );

@@ -7,10 +7,15 @@ import type { Db } from "./db";
 import { insertAmenity, insertBooking, insertExpense, insertGuest, insertRoom } from "./tenant";
 
 export const DEFAULT_SETTINGS = {
-  platformName: "Villa Stay Manager",
+  platformName: "LankaStay",
   supportEmail: "support@villaplatform.lk",
   supportPhone: "+94 77 000 1122",
   defaultMonthlyAmount: "5000",
+  signupsOpen: "true",
+  requireEmailVerification: "true",
+  searchIndexing: "true",
+  comingSoon: "false",
+  waitlistForm: "true",
 };
 
 /** First run only: platform settings, the Super Admin, and (unless SEED_DEMO=false) sample villas. */

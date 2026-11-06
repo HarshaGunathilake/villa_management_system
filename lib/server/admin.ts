@@ -3,12 +3,15 @@ import { bookingPhase, coversNight, guestCount, isActive } from "../availability
 import { fromISO, monthKey, toISO } from "../dates";
 import { monthSummary } from "../finance";
 import type { AppData, Booking, Expense, Room } from "../types";
-import { endSessionsForUser, endSessionsForVilla, hashPassword, verifyPassword, type SessionUser } from "./auth";
+import { endSessionsForUser, endSessionsForVilla, hashPassword, type SessionUser } from "./auth";
 import { nowSql, serverToday, sqlToIso } from "./config";
 import { db, transaction, type Db } from "./db";
 import { ApiError, badRequest, email as cleanEmail, integer, isoDate, notFound, oneOf, password as cleanPassword, recordId, text } from "./http";
 import { isPaidByCard, repriceSubscription } from "./billing";
 import { DEFAULT_SETTINGS } from "./seed";
+import { queueOwnerEmails, testEmail } from "./emails";
+import { loadMailSettings, saveMailSettings, sendEmail } from "./mail";
+import { changeOwnPassword } from "./passwords";
 import { loadBookings, loadRooms } from "./tenant";
 
 /* Super Admin only. Routes call requireSuperAdmin() before anything in this file. */
@@ -34,6 +37,11 @@ export async function loadSettings(): Promise<PlatformSettings> {
     supportEmail: get("supportEmail"),
     supportPhone: get("supportPhone"),
     defaultMonthlyAmount: Number(get("defaultMonthlyAmount")) || 0,
+    signupsOpen: get("signupsOpen") !== "false",
+    requireEmailVerification: get("requireEmailVerification") !== "false",
+    searchIndexing: get("searchIndexing") !== "false",
+    comingSoon: get("comingSoon") === "true",
+    waitlistForm: get("waitlistForm") !== "false",
   };
 }
 
@@ -50,8 +58,8 @@ export async function loadAdminData(me: SessionUser): Promise<AdminData> {
   const today = serverToday();
   const [villaRows, userRows, paymentRows, activityRows, settings] = await Promise.all([
     db.query<VillaRow>("SELECT * FROM villas ORDER BY created_at DESC, name"),
-    db.query<{ id: string; villa_id: string; name: string; email: string; phone: string; status: AdminUser["status"]; last_login_at: string | null; created_at: string }>(
-      "SELECT id, villa_id, name, email, phone, status, last_login_at, created_at FROM users WHERE role = 'villa_admin' ORDER BY created_at",
+    db.query<{ id: string; villa_id: string; name: string; email: string; phone: string; status: AdminUser["status"]; last_login_at: string | null; created_at: string; email_unverified: number }>(
+      "SELECT id, villa_id, name, email, phone, status, last_login_at, created_at, email_unverified FROM users WHERE role = 'villa_admin' ORDER BY created_at",
     ),
     db.query<{ id: string; villa_id: string; amount: number; payment_date: string; period_start: string; period_end: string; status: string; note: string; by_name: string | null; created_at: string }>(
       `SELECT p.id, p.villa_id, p.amount, p.payment_date, p.period_start, p.period_end, p.status, p.note, u.name AS by_name, p.created_at
@@ -65,6 +73,8 @@ export async function loadAdminData(me: SessionUser): Promise<AdminData> {
   ]);
 
   const expenseRows = await db.query<{ villa_id: string; amount: number; date: string }>("SELECT villa_id, amount, date FROM expenses");
+  // Villas that created their own account on the Register page (rather than being added here).
+  const signedUp = new Set((await db.query<{ villa_id: string }>("SELECT DISTINCT villa_id FROM activity_log WHERE action = 'villa_signed_up'")).map((r) => r.villa_id));
 
   const villas: AdminVilla[] = [];
   for (const v of villaRows) {
@@ -85,8 +95,9 @@ export async function loadAdminData(me: SessionUser): Promise<AdminData> {
       nextPaymentDate: v.next_payment_date,
       notes: v.notes ?? "",
       createdAt: sqlToIso(v.created_at)!,
-      disabledReason: v.account_status === "disabled" ? (v.disabled_reason === "subscription" ? "subscription" : "manual") : null,
+      disabledReason: v.account_status === "disabled" ? (v.disabled_reason === "subscription" || v.disabled_reason === "unpaid" ? v.disabled_reason : "manual") : null,
       card: { status: v.dodo_status, subscriptionId: v.dodo_subscription_id, customerId: v.dodo_customer_id },
+      signedUp: signedUp.has(v.id),
       stats: villaStats(today, rooms, bookings, expenseRows.filter((e) => e.villa_id === v.id)),
     });
   }
@@ -96,7 +107,7 @@ export async function loadAdminData(me: SessionUser): Promise<AdminData> {
     today,
     settings,
     villas,
-    admins: userRows.map((u) => ({ id: u.id, villaId: u.villa_id, name: u.name, email: u.email, phone: u.phone, status: u.status, lastLoginAt: sqlToIso(u.last_login_at), createdAt: sqlToIso(u.created_at)! })),
+    admins: userRows.map((u) => ({ id: u.id, villaId: u.villa_id, name: u.name, email: u.email, phone: u.phone, status: u.status, lastLoginAt: sqlToIso(u.last_login_at), createdAt: sqlToIso(u.created_at)!, emailVerified: !u.email_unverified })),
     payments: paymentRows.map((p): SubscriptionPayment => ({
       id: p.id, villaId: p.villa_id, amount: p.amount, paymentDate: p.payment_date, periodStart: p.period_start, periodEnd: p.period_end, status: p.status, note: p.note,
       createdBy: p.by_name ?? (p.note === "Card payment" ? "Dodo Payments" : ""), createdAt: sqlToIso(p.created_at)!,
@@ -165,6 +176,8 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       const villaId = newId("v");
       const userId = newId("u");
       const activate = body.activate !== false;
+      // Every villa pays the same price, set in Settings.
+      const price = (await loadSettings()).defaultMonthlyAmount;
 
       await transaction(async (tx) => {
         await assertEmailFree(tx, adminEmail);
@@ -175,15 +188,16 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
           [
             villaId, name, text(v.location, "Location", { max: 160, optional: true }), text(v.phone, "Phone", { max: 40, optional: true }),
             v.email ? cleanEmail(v.email, "Villa email") : "", text(v.address, "Address", { max: 255, optional: true }), text(v.description, "Description", { max: 2000, optional: true }) || null,
-            text(s.plan, "Plan", { max: 40, optional: true }) || "Standard", integer(s.monthlyAmount, "Monthly amount"), "active", "active", start, nextDue, now, now,
+            text(s.plan, "Plan", { max: 40, optional: true }) || "Standard", price, "active", "active", start, nextDue, now, now,
           ],
         );
-        await tx.run("INSERT INTO users (id, villa_id, name, email, phone, password_hash, role, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", [
+        await tx.run("INSERT INTO users (id, villa_id, name, email, phone, password_hash, role, status, created_at, updated_at, tour_pending) VALUES (?,?,?,?,?,?,?,?,?,?,1)", [
           userId, villaId, adminName, adminEmail, text(a.phone, "Admin phone", { max: 40, optional: true }), await hashPassword(adminPassword), "villa_admin", activate ? "active" : "disabled", now, now,
         ]);
         await logActivity(tx, me, villaId, "villa_created", `${name} created`);
         await logActivity(tx, me, villaId, "admin_created", `Admin account created for ${adminName}${activate ? "" : " (not activated yet)"}`);
       });
+      if (activate) queueOwnerEmails([{ kind: "welcome", villaId, signedUp: false }]);
       return { villaId };
     }
 
@@ -193,15 +207,12 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       const p = obj(body.patch, "Changes");
       const pick = <T,>(value: unknown, fallback: T) => (value === undefined ? fallback : value);
       const start = isoDate(pick(p.subscriptionStartDate, current.subscription_start_date), "Subscription start date");
-      const amount = integer(pick(p.monthlyAmount, current.monthly_subscription_amount), "Monthly amount");
+      // The price is the same for every villa and only changes in Settings.
+      const amount = current.monthly_subscription_amount;
       const nextDue = isoDate(pick(p.nextPaymentDate, current.next_payment_date), "Next payment date");
-      // A villa paying by card: Dodo sets the next payment date, and a new amount moves the card subscription to the new price.
-      if (await isPaidByCard(id)) {
-        if (nextDue !== current.next_payment_date) throw new ApiError(409, "paid_by_card", "This villa pays by card, so Dodo sets the next payment date.");
-        if (amount !== current.monthly_subscription_amount) {
-          if (amount < 1) throw badRequest("A villa paying by card needs a monthly amount.");
-          await repriceSubscription(id, amount);
-        }
+      // A villa paying by card: Dodo sets the next payment date.
+      if ((await isPaidByCard(id)) && nextDue !== current.next_payment_date) {
+        throw new ApiError(409, "paid_by_card", "This villa pays by card, so Dodo sets the next payment date.");
       }
       await db.run(
         `UPDATE villas SET name=?, location=?, phone=?, email=?, address=?, description=?, plan=?, monthly_subscription_amount=?, subscription_start_date=?, next_payment_date=?, notes=?, updated_at=? WHERE id = ?`,
@@ -221,7 +232,7 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
           id,
         ],
       );
-      const subscriptionChanged = ["plan", "monthlyAmount", "subscriptionStartDate", "nextPaymentDate"].some((k) => p[k] !== undefined);
+      const subscriptionChanged = ["plan", "subscriptionStartDate", "nextPaymentDate"].some((k) => p[k] !== undefined);
       await logActivity(db, me, id, subscriptionChanged ? "subscription_updated" : "villa_updated", subscriptionChanged ? `Subscription details updated for ${current.name}` : `${current.name} details updated`);
       return;
     }
@@ -252,7 +263,7 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       const name = text(body.name, "Admin name", { min: 2, max: 120 });
       const adminEmail = cleanEmail(body.email, "Admin email");
       await assertEmailFree(db, adminEmail);
-      await db.run("INSERT INTO users (id, villa_id, name, email, phone, password_hash, role, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", [
+      await db.run("INSERT INTO users (id, villa_id, name, email, phone, password_hash, role, status, created_at, updated_at, tour_pending) VALUES (?,?,?,?,?,?,?,?,?,?,1)", [
         newId("u"), villaId, name, adminEmail, text(body.phone, "Phone", { max: 40, optional: true }), await hashPassword(cleanPassword(body.password)), "villa_admin", "active", now, now,
       ]);
       await logActivity(db, me, villaId, "admin_created", `Admin account created for ${name} at ${v.name}`);
@@ -266,7 +277,18 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       await assertEmailFree(db, adminEmail, id);
       const name = text(body.name ?? u.name, "Admin name", { min: 2, max: 120 });
       await db.run("UPDATE users SET name=?, email=?, phone=?, updated_at=? WHERE id = ?", [name, adminEmail, text(body.phone ?? u.phone, "Phone", { max: 40, optional: true }), now, id]);
+      // The villa's contact email usually is the owner's sign-in email; keep the two in step.
+      if (adminEmail !== u.email && u.villa_id) await db.run("UPDATE villas SET email = ?, updated_at = ? WHERE id = ? AND email = ?", [adminEmail, now, u.villa_id, u.email]);
       await logActivity(db, me, u.villa_id, "admin_updated", `Admin ${name} updated`);
+      return;
+    }
+
+    case "markEmailVerified": {
+      const id = recordId(body.id, "Admin");
+      const u = await adminOrThrow(db, id);
+      await db.run("UPDATE users SET email_unverified = 0, updated_at = ? WHERE id = ?", [now, id]);
+      await db.run("DELETE FROM email_verifications WHERE user_id = ?", [id]);
+      await logActivity(db, me, u.villa_id, "admin_updated", `Email of ${u.name} marked as verified`);
       return;
     }
 
@@ -295,19 +317,62 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       if (p.platformName !== undefined) next.platformName = text(p.platformName, "Platform name", { min: 2, max: 80 });
       if (p.supportEmail !== undefined) next.supportEmail = p.supportEmail ? cleanEmail(p.supportEmail, "Support email") : "";
       if (p.supportPhone !== undefined) next.supportPhone = text(p.supportPhone, "Support phone", { max: 40, optional: true });
-      if (p.defaultMonthlyAmount !== undefined) next.defaultMonthlyAmount = String(integer(p.defaultMonthlyAmount, "Default monthly amount"));
+      if (p.defaultMonthlyAmount !== undefined) {
+        const price = integer(p.defaultMonthlyAmount, "Subscription price");
+        if (price < 1) throw badRequest("The subscription price must be at least LKR 1.");
+        next.defaultMonthlyAmount = String(price);
+      }
+      if (p.signupsOpen !== undefined) next.signupsOpen = p.signupsOpen === true ? "true" : "false";
+      if (p.requireEmailVerification !== undefined) next.requireEmailVerification = p.requireEmailVerification === true ? "true" : "false";
+      if (p.searchIndexing !== undefined) next.searchIndexing = p.searchIndexing === true ? "true" : "false";
+      if (p.comingSoon !== undefined) next.comingSoon = p.comingSoon === true ? "true" : "false";
+      if (p.waitlistForm !== undefined) next.waitlistForm = p.waitlistForm === true ? "true" : "false";
+      const before = await loadSettings();
       for (const [name, value] of Object.entries(next)) {
         await db.run("INSERT INTO platform_settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [name, value]);
       }
       await logActivity(db, me, null, "settings_updated", "Platform settings updated");
+
+      // One price for every villa: a new price moves them all. Card subscriptions change from their next payment.
+      const price = next.defaultMonthlyAmount ? Number(next.defaultMonthlyAmount) : null;
+      if (price === null) return;
+      const villas = await db.query<{ id: string; monthly_subscription_amount: number }>("SELECT id, monthly_subscription_amount FROM villas");
+      let cardFailures = 0;
+      for (const v of villas) {
+        if (v.monthly_subscription_amount === price) continue;
+        try {
+          await repriceSubscription(v.id, price);
+        } catch (error) {
+          cardFailures += 1;
+          console.error("[settings] could not move card subscription to the new price", v.id, error);
+          continue; // keep the old amount, so it matches what Dodo charges; saving again retries it
+        }
+        await db.run("UPDATE villas SET monthly_subscription_amount = ?, updated_at = ? WHERE id = ?", [price, nowSql(), v.id]);
+      }
+      if (price !== before.defaultMonthlyAmount) {
+        await logActivity(db, me, null, "price_changed", `Subscription price changed to LKR ${price.toLocaleString("en-US")} for every villa`);
+      }
+      if (cardFailures > 0) {
+        throw new ApiError(502, "payments_error", `Saved. ${cardFailures} card subscription(s) could not be moved to the new price yet. Save again to retry.`);
+      }
       return;
     }
 
     case "changePassword": {
-      const row = await db.one<{ password_hash: string }>("SELECT password_hash FROM users WHERE id = ?", [me.id]);
-      if (!row || !(await verifyPassword(String(body.current ?? ""), row.password_hash))) throw new ApiError(400, "wrong_password", "The current password is not right.");
-      await db.run("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", [await hashPassword(cleanPassword(body.next, "New password")), now, me.id]);
-      await logActivity(db, me, null, "settings_updated", "Super Admin password changed");
+      await changeOwnPassword(me, "admin", body.current, body.next);
+      return;
+    }
+
+    case "saveMail": {
+      await saveMailSettings(obj(body.mail, "Email settings"));
+      await logActivity(db, me, null, "settings_updated", "Email settings updated");
+      return { mail: await loadMailSettings() };
+    }
+
+    case "sendTestEmail": {
+      const to = cleanEmail(body.to, "Send to");
+      const result = await sendEmail({ kind: "test", to, build: testEmail() });
+      if (!result.ok) throw new ApiError(502, "email_failed", `The test email could not be sent: ${result.error}`);
       return;
     }
 

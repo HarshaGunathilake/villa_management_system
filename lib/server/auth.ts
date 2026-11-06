@@ -44,6 +44,10 @@ export interface SessionUser {
   phone: string;
   role: Role;
   status: "active" | "disabled";
+  /** False only for a self sign-up that has not clicked its verification link yet */
+  emailVerified: boolean;
+  /** Show the first-time guide on the next visit */
+  tourPending: boolean;
 }
 
 interface UserRow {
@@ -55,9 +59,11 @@ interface UserRow {
   role: Role;
   status: "active" | "disabled";
   password_hash: string;
+  email_unverified: number;
+  tour_pending: number;
 }
 
-const toUser = (r: UserRow): SessionUser => ({ id: r.id, villaId: r.villa_id, name: r.name, email: r.email, phone: r.phone, role: r.role, status: r.status });
+const toUser = (r: UserRow): SessionUser => ({ id: r.id, villaId: r.villa_id, name: r.name, email: r.email, phone: r.phone, role: r.role, status: r.status, emailVerified: !r.email_unverified, tourPending: !!r.tour_pending });
 
 export async function createSession(userId: string, portal: Portal, remember: boolean) {
   const token = randomBytes(32).toString("base64url");
@@ -93,7 +99,7 @@ async function currentUser(portal: Portal): Promise<SessionUser | null> {
   const token = (await cookies()).get(COOKIE[portal])?.value;
   if (!token) return null;
   const row = await db.one<UserRow>(
-    `SELECT u.id, u.villa_id, u.name, u.email, u.phone, u.role, u.status, u.password_hash
+    `SELECT u.id, u.villa_id, u.name, u.email, u.phone, u.role, u.status, u.password_hash, u.email_unverified, u.tour_pending
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ? AND s.expires_at > ?`,
     [sha256(token), nowSql()],
@@ -102,6 +108,12 @@ async function currentUser(portal: Portal): Promise<SessionUser | null> {
 }
 
 /* ------------------------------------------------------------------ guards */
+
+/** Super Admin → Settings: new sign-ups must verify their email (on unless switched off). */
+export async function verificationRequired() {
+  const row = await db.one<{ value: string }>("SELECT value FROM platform_settings WHERE name = 'requireEmailVerification'");
+  return row?.value !== "false";
+}
 
 export async function supportContact() {
   const rows = await db.query<{ name: string; value: string }>("SELECT name, value FROM platform_settings WHERE name IN ('supportEmail','supportPhone','platformName')");
@@ -113,12 +125,17 @@ async function accessDisabled() {
   return new ApiError(403, "access_disabled", "Your villa account is currently inactive.", { support: await supportContact() });
 }
 
-/** Access went off because the card subscription ended. The admin may sign in, but only to pay again. */
+/**
+ * No access until the villa pays: either the card subscription ended, or the
+ * villa signed up itself and has not made its first payment (firstPayment).
+ * The admin may sign in, but only to pay.
+ */
 async function subscriptionEnded(villaId: string) {
-  const villa = await db.one<{ monthly_subscription_amount: number }>("SELECT monthly_subscription_amount FROM villas WHERE id = ?", [villaId]);
-  return new ApiError(403, "subscription_ended", "Your subscription has ended.", {
+  const villa = await db.one<{ monthly_subscription_amount: number; disabled_reason: string | null }>("SELECT monthly_subscription_amount, disabled_reason FROM villas WHERE id = ?", [villaId]);
+  const firstPayment = villa?.disabled_reason === "unpaid";
+  return new ApiError(403, "subscription_ended", firstPayment ? "Your subscription has not started yet." : "Your subscription has ended.", {
     support: await supportContact(),
-    renewal: { monthlyAmount: villa?.monthly_subscription_amount ?? 0, canPay: dodoEnabled() },
+    renewal: { monthlyAmount: villa?.monthly_subscription_amount ?? 0, canPay: dodoEnabled(), firstPayment },
   });
 }
 
@@ -126,17 +143,22 @@ interface VillaAccessRow {
   account_status: string;
   disabled_reason: string | null;
 }
-const lapsed = (v: VillaAccessRow) => v.account_status === "disabled" && v.disabled_reason === "subscription";
+/** Off because of payment: the subscription ended ("subscription"), or a self sign-up has not paid yet ("unpaid"). */
+const lapsed = (v: VillaAccessRow) => v.account_status === "disabled" && (v.disabled_reason === "subscription" || v.disabled_reason === "unpaid");
 
 /**
  * Every villa request passes through here. The villa is taken from the
  * signed-in user's own record, never from anything the browser sends, and both
  * the user and the villa must be active.
  */
-export async function requireVillaAdmin(opts: { allowLapsed?: boolean } = {}): Promise<{ user: SessionUser; villaId: string }> {
+export async function requireVillaAdmin(opts: { allowLapsed?: boolean; allowUnverified?: boolean } = {}): Promise<{ user: SessionUser; villaId: string }> {
   const user = await currentUser("villa");
   if (!user || user.role !== "villa_admin" || !user.villaId) throw new ApiError(401, "unauthenticated", "Please sign in.");
   if (user.status !== "active") throw await accessDisabled();
+  // A new sign-up proves the email is theirs before anything else, paying included.
+  if (!user.emailVerified && !opts.allowUnverified && (await verificationRequired())) {
+    throw new ApiError(403, "email_unverified", "Please verify your email address first.", { email: user.email, support: await supportContact() });
+  }
   const villa = await db.one<VillaAccessRow>("SELECT account_status, disabled_reason FROM villas WHERE id = ?", [user.villaId]);
   if (!villa) throw await accessDisabled();
   if (lapsed(villa)) {
@@ -146,6 +168,23 @@ export async function requireVillaAdmin(opts: { allowLapsed?: boolean } = {}): P
   }
   if (villa.account_status !== "active") throw await accessDisabled();
   return { user, villaId: user.villaId };
+}
+
+/**
+ * A villa with a payment due or overdue is read-only: the admin can still see
+ * everything and pay, but every change is refused until the status is Active again.
+ */
+export async function requireVillaCanEdit(villaId: string) {
+  const villa = await db.one<{ subscription_status: string }>("SELECT subscription_status FROM villas WHERE id = ?", [villaId]);
+  if (villa && villa.subscription_status !== "active") {
+    throw new ApiError(
+      403,
+      "payment_due",
+      villa.subscription_status === "overdue"
+        ? "Your subscription payment is overdue, so changes are paused. Pay from the Subscription page to carry on."
+        : "Your subscription payment is due, so changes are paused. Pay from the Subscription page to carry on.",
+    );
+  }
 }
 
 export async function requireSuperAdmin(): Promise<SessionUser> {
@@ -170,7 +209,7 @@ export async function login(portal: Portal, emailInput: string, passwordInput: s
     throw new ApiError(429, "too_many_attempts", "Too many attempts. Please wait a few minutes and try again.");
   }
 
-  const row = await db.one<UserRow>("SELECT id, villa_id, name, email, phone, role, status, password_hash FROM users WHERE email = ?", [emailInput]);
+  const row = await db.one<UserRow>("SELECT id, villa_id, name, email, phone, role, status, password_hash, email_unverified, tour_pending FROM users WHERE email = ?", [emailInput]);
   const wantedRole: Role = portal === "admin" ? "super_admin" : "villa_admin";
   const valid = !!row && row.role === wantedRole && (await verifyPassword(passwordInput, row.password_hash));
 

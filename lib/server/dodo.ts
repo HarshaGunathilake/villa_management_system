@@ -110,7 +110,7 @@ export async function productFor(amount: number, platformName: string): Promise<
       tax_inclusive: true,
       trial_period_days: 0,
     },
-    metadata: { app: "villa-stay-manager", amount },
+    metadata: { app: "lankastay", amount },
   });
   // If two requests created one at the same moment, the first one saved wins.
   await db.run("INSERT IGNORE INTO dodo_products (mode, currency, amount, product_id, created_at) VALUES (?,?,?,?,?)", [mode, currency, amount, created.product_id, nowSql()]);

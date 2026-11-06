@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { documentHref } from "@/lib/documents";
+import { WhatsAppShareButton } from "@/components/whatsapp-share";
 import { AlertCircle, ArrowRight, CheckCircle2, FileText, LogIn, LogOut, Pencil, Phone, Plus, Wallet } from "lucide-react";
 import { Avatar, PlaceIcon, StatusBadge } from "@/components/booking-bits";
 import { PaymentBadge } from "@/components/ui/badge";
@@ -67,7 +68,7 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 }
 
 function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onEdit: () => void; onCheckOut: () => void }) {
-  const { today, rooms, checkIn, cancelBooking, recordPayment, openGuest, openBooking, notify } = useStore();
+  const { today, rooms, checkIn, cancelBooking, recordPayment, openGuest, openBooking, notify, readOnly } = useStore();
   const { guest, placeName, checkInTime: inTime, checkOutTime: outTime } = useLookups();
   const router = useRouter();
   const openDocument = (kind: "invoice" | "confirmation") => {
@@ -199,7 +200,7 @@ function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onE
               </div>
             </div>
           ) : (
-            <Button variant="accent" block className="mt-4" onClick={() => setPaying(true)}>
+            <Button variant="accent" block className="mt-4" disabled={readOnly} onClick={() => setPaying(true)}>
               <Wallet /> Record a payment
             </Button>
           )
@@ -222,6 +223,7 @@ function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onE
           <FileText /> Confirmation receipt
         </Button>
       </div>
+      <WhatsAppShareButton booking={booking} kind={booking.status === "checked_out" ? "invoice" : "confirmation"} className="w-full" />
 
       {!closed ? (
         <div className="space-y-2 pt-2">
@@ -229,6 +231,7 @@ function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onE
             <Button
               size="lg"
               block
+              disabled={readOnly}
               onClick={() => {
                 checkIn(booking.id);
                 notify(`${g?.name ?? "Guest"} checked in`);
@@ -238,11 +241,11 @@ function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onE
             </Button>
           ) : null}
           {canCheckOut ? (
-            <Button size="lg" block onClick={onCheckOut}>
+            <Button size="lg" block disabled={readOnly} onClick={onCheckOut}>
               <LogOut /> Check out
             </Button>
           ) : null}
-          <Button variant="secondary" size="lg" block onClick={onEdit}>
+          <Button variant="secondary" size="lg" block disabled={readOnly} onClick={onEdit}>
             <Pencil /> Edit booking
           </Button>
           {confirmCancel ? (
@@ -267,7 +270,7 @@ function BookingDetails({ booking, onEdit, onCheckOut }: { booking: Booking; onE
               </div>
             </div>
           ) : booking.status === "confirmed" ? (
-            <Button variant="ghost" size="lg" block className="text-clay" onClick={() => setConfirmCancel(true)}>
+            <Button variant="ghost" size="lg" block className="text-clay" disabled={readOnly} onClick={() => setConfirmCancel(true)}>
               Cancel booking
             </Button>
           ) : null}

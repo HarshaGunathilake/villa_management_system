@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, Home } from "lucide-react";
+import Link from "next/link";
+import { AlertCircle } from "lucide-react";
+import { BrandMark, Wordmark } from "@/components/brand";
 import { Photo } from "@/components/photo";
 import { Button } from "@/components/ui/button";
 import { Field, Input, PasswordInput } from "@/components/ui/field";
@@ -13,13 +15,12 @@ import { useStore } from "@/lib/store";
 
 export default function LoginPage() {
   const { signIn, access, support, reload } = useStore();
-  const [platform, setPlatform] = useState("Villa Stay Manager");
+  const [platform, setPlatform] = useState("LankaStay");
   const [email, setEmail] = useState(DEV_LOGIN.email);
   const [password, setPassword] = useState(DEV_LOGIN.password);
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     void api<{ platformName: string }>("/api/auth/info").then((r) => {
@@ -47,11 +48,9 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/10" />
         <div className="absolute inset-x-0 bottom-0 p-6 text-white sm:p-10 lg:p-14">
           <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-xl bg-white/15 backdrop-blur">
-              <Home className="size-6" aria-hidden />
-            </span>
+            <BrandMark className="size-11" />
             <div>
-              <div className="text-2xl leading-tight font-semibold sm:text-3xl">{platform}</div>
+              <Wordmark name={platform} className="block text-2xl leading-tight sm:text-3xl" accentClassName="text-[#bfe3d8]" />
               <div className="text-white/85">For villa owners and managers</div>
             </div>
           </div>
@@ -126,19 +125,19 @@ export default function LoginPage() {
             {busy ? "Signing in" : "Sign in"}
           </Button>
 
-          <button
-            type="button"
-            onClick={() => setHelpOpen(!helpOpen)}
-            aria-expanded={helpOpen}
-            className="mt-4 min-h-11 w-full rounded-xl font-medium text-brass-deep underline-offset-4 hover:underline"
+          <Link
+            href="/forgot-password"
+            className="mt-4 flex min-h-11 w-full items-center justify-center rounded-xl font-medium text-brass-deep underline-offset-4 hover:underline"
           >
             Forgot your password?
-          </button>
-          {helpOpen ? (
-            <p className="rounded-card border border-line bg-card p-4 text-[0.9375rem] text-muted">
-              Ask the platform administrator to reset your password. They can set a new one for you straight away.
-            </p>
-          ) : null}
+          </Link>
+
+          <p className="mt-6 border-t border-line pt-6 text-center">
+            New here?{" "}
+            <Link href="/register" className="font-medium text-brass-deep underline-offset-4 hover:underline">
+              Create an account
+            </Link>
+          </p>
         </form>
       </div>
     </div>

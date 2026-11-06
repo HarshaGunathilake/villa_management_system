@@ -81,6 +81,7 @@ export default function VillasPage() {
           { id: "active", label: "Active", count: count("active") },
           { id: "payment_due", label: "Payment due", count: count("payment_due") },
           { id: "overdue", label: "Overdue", count: count("overdue") },
+          { id: "awaiting_payment", label: "Awaiting first payment", count: count("awaiting_payment") },
           { id: "disabled", label: "Disabled", count: count("disabled") },
         ]}
       />

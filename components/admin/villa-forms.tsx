@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { ConfirmButtons, FormError, Modal } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
-import { Field, Input, MoneyInput, PasswordInput, Textarea } from "@/components/ui/field";
+import { Field, Input, PasswordInput, Textarea } from "@/components/ui/field";
 import { Sheet } from "@/components/ui/sheet";
 import { useAdmin, useAdminData } from "@/lib/admin-store";
 import type { AdminUser, AdminVilla } from "@/lib/admin-types";
 import { shiftMonths } from "@/lib/admin-logic";
+import { money } from "@/lib/utils";
 
 const plusMonth = (iso: string) => shiftMonths(iso, 1);
 
@@ -28,7 +29,6 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
   const { act, notify } = useAdmin();
   const { today, settings } = useAdminData();
   const [villa, setVilla] = useState({ name: "", location: "", phone: "", email: "", address: "", description: "" });
-  const [monthlyAmount, setMonthlyAmount] = useState(settings.defaultMonthlyAmount);
   const [startDate, setStartDate] = useState(today);
   const [nextPaymentDate, setNextPaymentDate] = useState(plusMonth(today));
   const [admin, setAdmin] = useState({ name: "", email: "", phone: "", password: "", confirm: "" });
@@ -55,7 +55,7 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
     const result = await act<{ villaId: string }>({
       type: "createVilla",
       villa,
-      subscription: { monthlyAmount, startDate, nextPaymentDate },
+      subscription: { startDate, nextPaymentDate },
       admin: { name: admin.name, email: admin.email, phone: admin.phone, password: admin.password },
       activate,
     });
@@ -109,14 +109,17 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
 
       <section className="space-y-4">
         <h3 className="text-lg font-semibold">Subscription</h3>
-        <Field label="Monthly subscription amount">{(id) => <MoneyInput id={id} value={monthlyAmount} onChange={setMonthlyAmount} />}</Field>
+        <div className="flex items-baseline justify-between gap-4 rounded-xl bg-well px-4 py-3">
+          <span className="text-muted">Monthly price</span>
+          <span className="tnum font-semibold">{money(settings.defaultMonthlyAmount)}</span>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Subscription start date">
             {(id) => <Input id={id} type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (e.target.value) setNextPaymentDate(plusMonth(e.target.value)); }} />}
           </Field>
           <Field label="Next payment due">{(id) => <Input id={id} type="date" value={nextPaymentDate} min={startDate} onChange={(e) => setNextPaymentDate(e.target.value)} />}</Field>
         </div>
-        <p className="text-sm text-muted">The villa admin pays this amount by card from their Subscription page. Payments are recorded by themselves.</p>
+        <p className="text-sm text-muted">Every villa pays the same price, set in Settings. The villa admin pays by card from their Subscription page, and payments are recorded by themselves.</p>
       </section>
 
       <section className="space-y-4">
@@ -159,7 +162,7 @@ function EditVillaForm({ villa, onClose }: { villa: AdminVilla; onClose: () => v
   const { act, notify } = useAdmin();
   const [draft, setDraft] = useState({
     name: villa.name, location: villa.location, phone: villa.phone, email: villa.email, address: villa.address, description: villa.description,
-    plan: villa.plan, monthlyAmount: villa.monthlyAmount, subscriptionStartDate: villa.subscriptionStartDate, nextPaymentDate: villa.nextPaymentDate,
+    plan: villa.plan, subscriptionStartDate: villa.subscriptionStartDate, nextPaymentDate: villa.nextPaymentDate,
   });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -194,7 +197,11 @@ function EditVillaForm({ villa, onClose }: { villa: AdminVilla; onClose: () => v
         <h3 className="text-lg font-semibold">Subscription</h3>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Plan">{(id) => <Input id={id} value={draft.plan} onChange={set("plan")} />}</Field>
-          <Field label="Monthly amount">{(id) => <MoneyInput id={id} value={draft.monthlyAmount} onChange={(n) => setDraft({ ...draft, monthlyAmount: n })} />}</Field>
+          <div>
+            <div className="mb-2 font-medium">Monthly price</div>
+            <div className="tnum flex min-h-12 items-center rounded-xl bg-well px-4 font-semibold">{money(villa.monthlyAmount)}</div>
+            <p className="mt-1.5 text-sm text-muted">The same for every villa. Change it in Settings.</p>
+          </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Subscription start date">{(id) => <Input id={id} type="date" value={draft.subscriptionStartDate} onChange={set("subscriptionStartDate")} />}</Field>
@@ -202,7 +209,6 @@ function EditVillaForm({ villa, onClose }: { villa: AdminVilla; onClose: () => v
             {(id) => <Input id={id} type="date" value={draft.nextPaymentDate} onChange={set("nextPaymentDate")} disabled={paidByCard} />}
           </Field>
         </div>
-        {paidByCard ? <p className="text-sm text-muted">A new monthly amount is charged from the villa&apos;s next card payment. Nothing extra is charged now.</p> : null}
       </section>
       <FormError message={error} />
       <Button type="submit" size="lg" block disabled={busy || draft.name.trim().length < 2}>

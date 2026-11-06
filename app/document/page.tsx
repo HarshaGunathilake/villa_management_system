@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Printer } from "lucide-react";
 import { EmptyState } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { WhatsAppShareButton } from "@/components/whatsapp-share";
 import { guestCount } from "@/lib/availability";
 import { fmtDayWeek, fmtFull, nightsBetween } from "@/lib/dates";
 import { bookingNumber } from "@/lib/documents";
@@ -65,9 +66,12 @@ function BookingDocument() {
         <Button variant="secondary" onClick={() => router.push("/bookings")}>
           <ArrowLeft /> Back to bookings
         </Button>
-        <Button onClick={() => window.print()}>
-          <Printer /> Print or save as PDF
-        </Button>
+        <div className="flex flex-wrap gap-3">
+          <WhatsAppShareButton booking={booking} kind={isInvoice ? "invoice" : "confirmation"} size="md" />
+          <Button onClick={() => window.print()}>
+            <Printer /> Print or save as PDF
+          </Button>
+        </div>
       </div>
 
       <article className="mx-auto max-w-[50rem] rounded-card border border-line bg-white p-6 shadow-card sm:p-12 print:max-w-none print:rounded-none print:border-0 print:p-0 print:shadow-none">

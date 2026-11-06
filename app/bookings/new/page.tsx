@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, BedDouble, CalendarSearch, Check, CheckCircle2, FileText, Home, Lock, Users, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, BedDouble, CalendarSearch, Check, CheckCircle2, FileText, Home, Lock, Plus, Users, X } from "lucide-react";
 import { documentHref } from "@/lib/documents";
 import { Avatar, PlaceIcon } from "@/components/booking-bits";
 import { ExtrasPicker } from "@/components/extras";
@@ -136,7 +137,7 @@ export default function NewBookingPage() {
 
   const back = () => {
     const i = STEP_ORDER.indexOf(step);
-    if (i <= 0) router.push("/");
+    if (i <= 0) router.push("/dashboard");
     else setStep(STEP_ORDER[i - 1]);
   };
 
@@ -243,7 +244,7 @@ export default function NewBookingPage() {
             >
               View booking
             </Button>
-            <Button variant="secondary" size="lg" onClick={() => router.push("/")}>
+            <Button variant="secondary" size="lg" onClick={() => router.push("/dashboard")}>
               Back to home
             </Button>
           </div>
@@ -256,6 +257,23 @@ export default function NewBookingPage() {
   const stepIndex = STEP_ORDER.indexOf(step);
   const title =
     step === "dates" && mode === "villa" ? "When is the villa needed?" : step === "dates" && mode === "room" ? "Which room, and when?" : STEP_TITLES[step];
+
+  // Payment due: no new bookings until it is paid (the server refuses them too).
+  if (store.readOnly) {
+    return (
+      <div className="mx-auto max-w-xl py-10 text-center">
+        <span className="mx-auto grid size-16 place-items-center rounded-full bg-amber-soft text-amber-deep">
+          <Lock className="size-7" />
+        </span>
+        <h1 className="mt-5 text-[1.875rem] leading-tight font-semibold">New bookings are paused</h1>
+        <p className="mt-2 text-lg text-muted">Your subscription payment is due. Pay it from the Subscription page and you can take bookings again straight away.</p>
+        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+          <Button onClick={() => router.push("/subscription")}>Go to Subscription</Button>
+          <Button variant="secondary" onClick={() => router.back()}>Back</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl pb-28">
@@ -274,7 +292,7 @@ export default function NewBookingPage() {
           </div>
         </div>
         {stepIndex > 0 ? (
-          <button type="button" onClick={() => router.push("/")} className="-mr-2 grid size-12 place-items-center rounded-full text-muted hover:bg-well" aria-label="Close without saving">
+          <button type="button" onClick={() => router.push("/dashboard")} className="-mr-2 grid size-12 place-items-center rounded-full text-muted hover:bg-well" aria-label="Close without saving">
             <X className="size-6" />
           </button>
         ) : null}
@@ -294,32 +312,61 @@ export default function NewBookingPage() {
                 </div>
                 <p className="mt-1 text-muted">Private access to the whole villa</p>
                 <p className="mt-2 font-medium">
-                  {plural(usableRooms.length, "room")}, up to {villa.maxGuests} guests, {money(villa.price)} a night
+                  {usableRooms.length > 0 ? `${plural(usableRooms.length, "room")}, up to` : "Up to"} {villa.maxGuests} guests, {villa.price > 0 ? `${money(villa.price)} a night` : "no price set yet (Villa settings)"}
                 </p>
               </div>
               <span className="hidden rounded-xl bg-ink px-5 py-3 font-medium text-white sm:block">Select</span>
             </div>
           </button>
 
-          <button type="button" onClick={() => startWith("room")} className="group block w-full overflow-hidden rounded-card border border-line bg-card text-left shadow-card transition-colors hover:border-ink">
-            <div className="grid h-36 grid-cols-3 gap-0.5 sm:h-44">
-              {usableRooms.slice(0, 3).map((r) => (
-                <Photo key={r.id} src={r.photo} alt="" />
-              ))}
-            </div>
-            <div className="flex items-center gap-4 p-5">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 text-2xl font-semibold">
-                  <BedDouble className="size-6 text-brass-deep" /> Individual Room
-                </div>
-                <p className="mt-1 text-muted">Book one room. Choose from the rooms that are free.</p>
-                {usableRooms.length > 0 ? (
-                  <p className="mt-2 font-medium">From {money(Math.min(...usableRooms.map((r) => r.price)))} a night</p>
-                ) : null}
+          {usableRooms.length > 0 ? (
+            <button type="button" onClick={() => startWith("room")} className="group block w-full overflow-hidden rounded-card border border-line bg-card text-left shadow-card transition-colors hover:border-ink">
+              <div className="grid h-36 grid-cols-3 gap-0.5 sm:h-44">
+                {usableRooms.slice(0, 3).map((r) => (
+                  <Photo key={r.id} src={r.photo} alt="" />
+                ))}
               </div>
-              <span className="hidden rounded-xl bg-ink px-5 py-3 font-medium text-white sm:block">Select</span>
+              <div className="flex items-center gap-4 p-5">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 text-2xl font-semibold">
+                    <BedDouble className="size-6 text-brass-deep" /> Individual Room
+                  </div>
+                  <p className="mt-1 text-muted">Book one room. Choose from the rooms that are free.</p>
+                  {usableRooms.length > 0 ? (
+                    <p className="mt-2 font-medium">From {money(Math.min(...usableRooms.map((r) => r.price)))} a night</p>
+                  ) : null}
+                </div>
+                <span className="hidden rounded-xl bg-ink px-5 py-3 font-medium text-white sm:block">Select</span>
+              </div>
+            </button>
+          ) : (
+            // No rooms take bookings yet: say so, and offer the way to add them.
+            <div className="overflow-hidden rounded-card border border-line bg-card shadow-card">
+              <div className="grid h-28 place-items-center bg-well sm:h-32">
+                <span className="grid size-14 place-items-center rounded-full bg-card text-brass-deep">
+                  <BedDouble className="size-7" aria-hidden />
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 p-5">
+                <div className="min-w-0 flex-1 basis-64">
+                  <div className="flex items-center gap-2 text-2xl font-semibold">
+                    <BedDouble className="size-6 text-brass-deep" /> Individual Room
+                  </div>
+                  <p className="mt-1 text-muted">
+                    {rooms.length === 0
+                      ? "You haven't added any rooms yet. Add your rooms, with a name and price, to book them one at a time."
+                      : "None of your rooms take bookings right now. Switch a room on in Rooms to book it."}
+                  </p>
+                </div>
+                <Link
+                  href={rooms.length === 0 ? "/rooms?add=1" : "/rooms"}
+                  className="inline-flex min-h-12 items-center gap-2 rounded-xl bg-ink px-5 font-medium text-white hover:bg-black"
+                >
+                  <Plus className="size-5" aria-hidden /> {rooms.length === 0 ? "Add rooms" : "Open Rooms"}
+                </Link>
+              </div>
             </div>
-          </button>
+          )}
 
           <button type="button" onClick={() => startWith("any")} className="flex min-h-14 w-full items-center gap-3 rounded-card border border-dashed border-line-strong px-5 py-4 text-left hover:bg-well">
             <CalendarSearch className="size-6 shrink-0 text-brass-deep" />

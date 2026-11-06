@@ -21,7 +21,15 @@ export default function MoneyPage() {
 
   return (
     <div>
-      <PageHeader title="Money" subtitle="A simple look at the month" />
+      <PageHeader
+        title="Money"
+        subtitle="A simple look at the month"
+        action={
+          <Link href="/reports" className="inline-flex min-h-12 items-center rounded-xl border border-line-strong bg-card px-5 font-medium hover:bg-well">
+            Full reports
+          </Link>
+        }
+      />
       <MonthNav value={month} onChange={setMonth} />
 
       <div className="grid gap-4 lg:grid-cols-3">
