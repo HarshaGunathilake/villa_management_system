@@ -41,10 +41,10 @@ export function BrowserFrame({ shot, url, className, priority }: { shot: Shot; u
 }
 
 /** A phone around a screenshot. */
-export function PhoneFrame({ shot, className, dark }: { shot: Shot; className?: string; dark?: boolean }) {
+export function PhoneFrame({ shot, className, dark, sizes = "240px", priority }: { shot: Shot; className?: string; dark?: boolean; sizes?: string; priority?: boolean }) {
   return (
     <div className={cn("rounded-[2.25rem] p-[9px]", dark ? "border border-lp-night-line bg-[#0a1211]" : "bg-lp-ink", className)}>
-      <Shot shot={shot} sizes="240px" className="rounded-[1.75rem]" />
+      <Shot shot={shot} sizes={sizes} priority={priority} className="rounded-[1.75rem]" />
     </div>
   );
 }

@@ -5,7 +5,8 @@ import { ComingSoon, PreviewBar } from "@/components/site/coming-soon";
 import { JsonLd } from "@/components/site/json-ld";
 import { SiteFooter } from "@/components/site/site-footer";
 import { organization, pageMeta, SITE_DESCRIPTION, softwareApp, webPage, website } from "@/lib/server/seo";
-import { BillPicture, CalendarPicture, GuestPicture, MoneyPicture, TonightPanel } from "@/components/landing/previews";
+import { BillPicture, CalendarPicture, GuestPicture, MoneyPicture } from "@/components/landing/previews";
+import { PhoneFrame, SHOTS } from "@/components/site/frames";
 import { loadSite } from "@/lib/server/site";
 import { money } from "@/lib/utils";
 
@@ -90,28 +91,63 @@ export default async function LandingPage() {
 
       <main id="main">
         {/* Hero */}
-        <section className="mx-auto flex max-w-[75rem] flex-wrap items-center gap-14 px-6 pt-14 pb-20 sm:pt-[4.5rem] sm:pb-[5.5rem]">
-          <div className="min-w-0 flex-[1_1_27.5rem]">
-            <p className={kicker}>For villas with a handful of rooms</p>
-            <h1 className="mt-4 font-display text-[2.75rem] leading-[1.02] font-bold tracking-[-0.04em] sm:text-[4rem]">Every room, every guest, every rupee.</h1>
-            <p className="mt-6 max-w-[31.25rem] text-lg leading-relaxed text-lp-muted sm:text-[1.1875rem]">
-              Take bookings for the whole villa or a single room, check guests in and out, settle the bill and track what you spend. On your phone or your laptop.
-            </p>
-            <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-3">
-              <Link
-                href={primary.href}
-                className={`group inline-flex min-h-[3.25rem] items-center gap-2.5 rounded-xl bg-lp-accent px-[1.625rem] font-semibold text-white transition-colors duration-200 hover:bg-lp-accent-deep active:translate-y-px ${focus}`}
-              >
-                {primary.label} <Arrow />
-              </Link>
-              <Link href="/features" className="font-medium underline decoration-lp-line decoration-2 underline-offset-[6px] transition-colors hover:decoration-lp-ink">
-                See what it does
-              </Link>
+        <section className="relative isolate flex flex-col overflow-hidden bg-lp-ink text-white lg:min-h-[calc(100svh-4.5rem-1px)]">
+          <div aria-hidden className="pointer-events-none absolute -top-48 right-[-10rem] -z-10 hidden size-[44rem] rounded-full bg-lp-mint opacity-[0.12] lg:block" />
+          <div aria-hidden className="pointer-events-none absolute -bottom-64 left-[45%] -z-10 size-[34rem] rounded-full bg-lp-accent opacity-60" />
+          <div className="mx-auto flex w-full max-w-[75rem] flex-1 flex-wrap items-center gap-x-10 gap-y-12 px-6 pt-12 sm:pt-16 lg:pt-0">
+
+            <div className="min-w-0 flex-[1_1_27rem] lg:py-24">
+              <p className="inline-flex items-center gap-2.5 rounded-full border border-lp-mint/50 py-1.5 pr-4 pl-3 text-[0.875rem] font-semibold text-lp-mint">
+                <span className="size-2 rounded-full bg-lp-mint" aria-hidden />
+                <span>
+                  Made in Sri Lanka<span className="hidden sm:inline">, for villas with a handful of rooms</span>
+                </span>
+              </p>
+              <h1 className="mt-6 font-display text-[2.75rem] leading-[1.02] font-bold tracking-[-0.04em] sm:text-[4.25rem]">Every room, every guest, every rupee.</h1>
+              <p className="mt-6 max-w-[31.25rem] text-lg leading-relaxed text-lp-night-muted sm:text-[1.1875rem]">
+                Take bookings for the whole villa or a single room, check guests in and out, settle the bill and track what you spend. On your phone or your laptop.
+              </p>
+              <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-4">
+                <Link
+                  href={primary.href}
+                  className="group inline-flex min-h-[3.25rem] items-center gap-2.5 rounded-xl bg-lp-mint px-[1.625rem] font-semibold text-lp-ink transition-colors duration-200 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-lp-mint active:translate-y-px"
+                >
+                  {primary.label} <Arrow />
+                </Link>
+                <Link
+                  href="/features"
+                  className="font-medium underline decoration-white/30 decoration-2 underline-offset-[6px] transition-colors hover:decoration-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-lp-mint"
+                >
+                  See what it does
+                </Link>
+              </div>
+              <ul className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-[0.9375rem] text-lp-night-muted">
+                {[priced ? `${money(p.signup.monthlyAmount)} a month` : "One monthly price", "Every feature included", "Cancel any time"].map((t) => (
+                  <li key={t} className="flex items-center gap-2">
+                    <span className="text-lp-mint">
+                      <Check />
+                    </span>
+                    {t}
+                  </li>
+                ))}
+              </ul>
             </div>
-            {priced ? <p className="mt-5 text-[0.9375rem] text-lp-muted">{money(p.signup.monthlyAmount)} a month, paid by card. Cancel any time.</p> : null}
-          </div>
-          <div className="min-w-0 flex-[1_1_30rem]">
-            <TonightPanel />
+
+            <div className="relative mx-auto flex min-w-0 flex-[1_1_24rem] items-end justify-center self-end">
+              <PhoneFrame
+                shot={SHOTS.phoneHome}
+                dark
+                sizes="(min-width: 1280px) 264px, (min-width: 640px) 240px, 168px"
+                className="relative z-0 -mr-10 mb-10 w-[10.5rem] rotate-[-4deg] opacity-90 shadow-[0_30px_60px_rgba(0,0,0,0.45)] sm:-mr-12 sm:mb-14 sm:w-[15rem] xl:w-[16.5rem]"
+              />
+              <PhoneFrame
+                shot={SHOTS.phoneCalendar}
+                dark
+                priority
+                sizes="(min-width: 1280px) 320px, (min-width: 640px) 290px, 200px"
+                className="relative z-10 -mb-24 w-[12.5rem] shadow-[0_40px_80px_rgba(0,0,0,0.55)] sm:-mb-28 sm:w-[18rem] xl:w-[20rem]"
+              />
+            </div>
           </div>
         </section>
 
