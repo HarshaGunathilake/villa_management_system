@@ -127,6 +127,18 @@ export async function repriceSubscription(villaId: string, newAmount: number) {
   return true;
 }
 
+/**
+ * When the Super Admin switches a villa off, its card subscription is cancelled
+ * straight away so the owner is not charged for a villa they can't use.
+ */
+export async function cancelForDisable(villaId: string) {
+  const villa = await db.one<VillaBillingRow>(`SELECT ${BILLING_COLUMNS} FROM villas WHERE id = ?`, [villaId]);
+  if (!villa?.dodo_subscription_id || !villa.dodo_status || !LIVE.has(villa.dodo_status)) return false;
+  await dodo.cancel(villa.dodo_subscription_id);
+  await db.run("UPDATE villas SET dodo_status = 'cancelled', updated_at = ? WHERE id = ?", [nowSql(), villaId]);
+  return true;
+}
+
 /** A live card subscription sets the next payment date itself. */
 export async function isPaidByCard(villaId: string) {
   const villa = await db.one<{ dodo_status: string | null }>("SELECT dodo_status FROM villas WHERE id = ?", [villaId]);

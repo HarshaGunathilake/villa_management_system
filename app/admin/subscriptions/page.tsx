@@ -20,12 +20,11 @@ import { Button } from "@/components/ui/button";
 import { useAdmin, useAdminData } from "@/lib/admin-store";
 import { BADGE_LABEL, villaBadge, type AdminUser, type AdminVilla, type SubscriptionPayment } from "@/lib/admin-types";
 import { downloadCsv } from "@/lib/csv";
-import { addMonths, fmtMonthLong, monthKey } from "@/lib/dates";
 import { cn, money } from "@/lib/utils";
 
 /*
  * Every villa's subscription in one place: what Dodo says about the card,
- * when it is charged next, what it has paid, and the full payment history.
+ * when it is charged next and what it has paid. Payments have their own page.
  */
 
 type Filter = "all" | "paying" | "awaiting" | "trouble" | "due" | "ended" | "off";
@@ -84,10 +83,6 @@ export default function SubscriptionsPage() {
 
   // Figures for the tiles
   const paying = villas.filter((v) => v.card.status === "active" && v.accountStatus === "active");
-  const thisMonth = monthKey(today);
-  const collected = payments.filter((p) => monthKey(p.paymentDate) === thisMonth).reduce((s, p) => s + p.amount, 0);
-  const lastMonth = payments.filter((p) => monthKey(p.paymentDate) === addMonths(thisMonth, -1)).reduce((s, p) => s + p.amount, 0);
-  const lifetime = payments.reduce((s, p) => s + p.amount, 0);
 
   const markDue = async (v: AdminVilla) => {
     const result = await act({ type: "setSubscriptionStatus", id: v.id, status: "payment_due" });
@@ -132,12 +127,8 @@ export default function SubscriptionsPage() {
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatTile label="Monthly income" value={money(paying.reduce((s, v) => s + v.monthlyAmount, 0))} note={`${paying.length} paying by card`} />
-        <StatTile
-          label="Collected this month"
-          value={money(collected)}
-          note={lastMonth > 0 ? `${money(lastMonth)} last month` : "Nothing last month"}
-        />
-        <StatTile label="Collected in total" value={money(lifetime)} note={`${payments.length} card ${payments.length === 1 ? "payment" : "payments"}`} />
+        <StatTile label="Awaiting first payment" value={villas.filter((v) => filterOf(v) === "awaiting").length} note="Signed up, not paid yet" />
+        <StatTile label="Ended or switched off" value={villas.filter((v) => filterOf(v) === "ended" || filterOf(v) === "off").length} note="Not being charged" />
         <StatTile
           label="Card problems"
           value={villas.filter((v) => v.card.status && TROUBLE.includes(v.card.status)).length}
@@ -285,6 +276,9 @@ export default function SubscriptionsPage() {
                           <Link href={`/admin/villas/${r.villa.id}`} className="inline-flex min-h-10 items-center rounded-[0.625rem] border border-line-strong bg-card px-3.5 text-[0.9375rem] font-medium hover:bg-well">
                             Open villa
                           </Link>
+                          <Link href="/admin/payments" className="inline-flex min-h-10 items-center rounded-[0.625rem] border border-line-strong bg-card px-3.5 text-[0.9375rem] font-medium hover:bg-well">
+                            All payments
+                          </Link>
                           <Button variant="secondary" size="sm" disabled={r.villa.subscriptionStatus !== "active" || r.villa.accountStatus !== "active"} onClick={() => markDue(r.villa)}>
                             Mark payment due
                           </Button>
@@ -299,72 +293,6 @@ export default function SubscriptionsPage() {
         </AdminCard>
       )}
 
-      <PaymentHistory />
     </div>
-  );
-}
-
-/** Every card payment, filterable by month and villa, with CSV export. */
-function PaymentHistory() {
-  const { villas, payments, today } = useAdminData();
-  const [month, setMonth] = useState("all");
-  const [villaId, setVillaId] = useState("all");
-  const villaName = new Map(villas.map((v) => [v.id, v.name]));
-  const months = [...new Set(payments.map((p) => monthKey(p.paymentDate)))].sort().reverse();
-  const list = payments.filter((p) => (month === "all" || monthKey(p.paymentDate) === month) && (villaId === "all" || p.villaId === villaId));
-  const total = list.reduce((s, p) => s + p.amount, 0);
-
-  const exportCsv = () =>
-    downloadCsv(
-      `card-payments-${month === "all" ? today : month}.csv`,
-      ["Date", "Villa", "Amount (LKR)", "Covers from", "Covers to", "Method", "Status"],
-      list.map((p) => [p.paymentDate, villaName.get(p.villaId) ?? "Removed villa", p.amount, p.periodStart, p.periodEnd, p.note || "Card payment", p.status]),
-    );
-
-  return (
-    <section aria-labelledby="history-heading" className="mt-10">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 id="history-heading" className="text-xl font-semibold">
-          Payment history
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <FilterSelect value={month} onChange={setMonth} label="Month" options={[{ value: "all", label: "All months" }, ...months.map((m) => ({ value: m, label: fmtMonthLong(m) }))]} />
-          <FilterSelect value={villaId} onChange={setVillaId} label="Villa" options={[{ value: "all", label: "All villas" }, ...villas.map((v) => ({ value: v.id, label: v.name }))]} className="max-w-56" />
-          <Button variant="secondary" onClick={exportCsv} disabled={list.length === 0}>
-            <Download /> CSV
-          </Button>
-        </div>
-      </div>
-      <AdminCard>
-        {list.length === 0 ? (
-          <p className="p-5 text-muted">No payments{month !== "all" || villaId !== "all" ? " for this filter" : " recorded yet"}.</p>
-        ) : (
-          <>
-            <ul className="divide-y divide-line">
-              {list.map((p) => (
-                <li key={p.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 px-5 py-3.5">
-                  <span className="tnum w-28 shrink-0 text-muted">{fmtDate(p.paymentDate)}</span>
-                  <span className="min-w-0 flex-1 basis-52">
-                    <Link href={`/admin/villas/${p.villaId}`} className="font-medium underline-offset-4 hover:underline">
-                      {villaName.get(p.villaId) ?? "Removed villa"}
-                    </Link>
-                    <span className="text-muted">
-                      , {fmtDate(p.periodStart)} to {fmtDate(p.periodEnd)}
-                    </span>
-                  </span>
-                  <span className="tnum font-semibold">{money(p.amount)}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="flex justify-between border-t border-line px-5 py-3.5 font-semibold">
-              <span>
-                {list.length} {list.length === 1 ? "payment" : "payments"}
-              </span>
-              <span className="tnum">{money(total)}</span>
-            </div>
-          </>
-        )}
-      </AdminCard>
-    </section>
   );
 }

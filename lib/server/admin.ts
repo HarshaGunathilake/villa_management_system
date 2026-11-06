@@ -7,9 +7,10 @@ import { endSessionsForUser, endSessionsForVilla, hashPassword, type SessionUser
 import { nowSql, serverToday, sqlToIso } from "./config";
 import { db, transaction, type Db } from "./db";
 import { ApiError, badRequest, email as cleanEmail, integer, isoDate, notFound, oneOf, password as cleanPassword, recordId, text } from "./http";
-import { isPaidByCard, repriceSubscription } from "./billing";
+import { cancelForDisable, isPaidByCard, repriceSubscription } from "./billing";
+import { renameProducts } from "./dodo";
 import { DEFAULT_SETTINGS } from "./seed";
-import { queueOwnerEmails, testEmail } from "./emails";
+import { later, queueOwnerEmails, testEmail } from "./emails";
 import { loadMailSettings, saveMailSettings, sendEmail } from "./mail";
 import { changeOwnPassword } from "./passwords";
 import { loadBookings, loadRooms } from "./tenant";
@@ -241,10 +242,19 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       const id = recordId(body.id, "Villa");
       const status = oneOf(body.status, ["active", "disabled"] as const, "Status");
       const v = await villaOrThrow(db, id);
-      await db.run("UPDATE villas SET account_status = ?, disabled_reason = ?, updated_at = ? WHERE id = ?", [status, status === "disabled" ? "manual" : null, now, id]);
+      // Off by hand: stop the card first, so a failed cancel leaves nothing half done.
+      const cancelled = status === "disabled" ? await cancelForDisable(id) : false;
+      // Back on: a villa that paid by card but has no live subscription any more has to pay again first.
+      const mustPay = status === "active" && !!v.dodo_customer_id && !(await isPaidByCard(id));
+      await db.run("UPDATE villas SET account_status = ?, disabled_reason = ?, updated_at = ? WHERE id = ?", [
+        mustPay ? "disabled" : status, status === "disabled" ? "manual" : mustPay ? "subscription" : null, now, id,
+      ]);
       // Switching a villa off signs its admins out straight away.
       if (status === "disabled") await endSessionsForVilla(id);
-      await logActivity(db, me, id, status === "disabled" ? "villa_disabled" : "villa_enabled", `${v.name} access ${status === "disabled" ? "disabled" : "enabled"}`);
+      const detail = status === "disabled"
+        ? `${v.name} access disabled${cancelled ? ", card subscription cancelled" : ""}`
+        : `${v.name} access enabled${mustPay ? ", waiting for a new card payment" : ""}`;
+      await logActivity(db, me, id, status === "disabled" ? "villa_disabled" : "villa_enabled", detail);
       return;
     }
 
@@ -270,19 +280,6 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       return;
     }
 
-    case "updateAdmin": {
-      const id = recordId(body.id, "Admin");
-      const u = await adminOrThrow(db, id);
-      const adminEmail = cleanEmail(body.email ?? u.email, "Admin email");
-      await assertEmailFree(db, adminEmail, id);
-      const name = text(body.name ?? u.name, "Admin name", { min: 2, max: 120 });
-      await db.run("UPDATE users SET name=?, email=?, phone=?, updated_at=? WHERE id = ?", [name, adminEmail, text(body.phone ?? u.phone, "Phone", { max: 40, optional: true }), now, id]);
-      // The villa's contact email usually is the owner's sign-in email; keep the two in step.
-      if (adminEmail !== u.email && u.villa_id) await db.run("UPDATE villas SET email = ?, updated_at = ? WHERE id = ? AND email = ?", [adminEmail, now, u.villa_id, u.email]);
-      await logActivity(db, me, u.villa_id, "admin_updated", `Admin ${name} updated`);
-      return;
-    }
-
     case "markEmailVerified": {
       const id = recordId(body.id, "Admin");
       const u = await adminOrThrow(db, id);
@@ -299,15 +296,6 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       await db.run("UPDATE users SET status = ?, updated_at = ? WHERE id = ?", [status, now, id]);
       if (status === "disabled") await endSessionsForUser(id);
       await logActivity(db, me, u.villa_id, status === "disabled" ? "admin_disabled" : "admin_enabled", `Admin ${u.name} ${status === "disabled" ? "disabled" : "enabled"}`);
-      return;
-    }
-
-    case "resetPassword": {
-      const id = recordId(body.id, "Admin");
-      const u = await adminOrThrow(db, id);
-      await db.run("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", [await hashPassword(cleanPassword(body.password)), now, id]);
-      await endSessionsForUser(id);
-      await logActivity(db, me, u.villa_id, "admin_password_reset", `Password reset for ${u.name}`);
       return;
     }
 
@@ -332,6 +320,11 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
         await db.run("INSERT INTO platform_settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [name, value]);
       }
       await logActivity(db, me, null, "settings_updated", "Platform settings updated");
+      // The Dodo checkout shows the platform name in the product; keep it in step.
+      if (next.platformName && next.platformName !== before.platformName) {
+        const platformName = next.platformName;
+        later(() => renameProducts(platformName));
+      }
 
       // One price for every villa: a new price moves them all. Card subscriptions change from their next payment.
       const price = next.defaultMonthlyAmount ? Number(next.defaultMonthlyAmount) : null;

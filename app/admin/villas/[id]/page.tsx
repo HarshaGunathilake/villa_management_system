@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, KeyRound, Mail, MailCheck, MailWarning, MapPin, Pencil, Phone, Plus } from "lucide-react";
+import { ArrowLeft, Mail, MailCheck, MailWarning, MapPin, Phone, Plus } from "lucide-react";
 import { ActivityList } from "@/components/admin/activity-list";
 import { AccessBadge, AdminCard, CardBadge, fmtDate, fmtStamp, FormError, relativeDay, StatTile, SubscriptionBadge, TabBar, VillaAccessBadge, VillaStatusBadge } from "@/components/admin/ui";
-import { AccessModal, AdminStatusModal, AdminUserModal, EditVillaSheet, ResetPasswordModal } from "@/components/admin/villa-forms";
+import { AccessModal, AdminStatusModal, AdminUserModal } from "@/components/admin/villa-forms";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/field";
@@ -23,7 +23,6 @@ export default function VillaDetailPage() {
   const data = useAdminData();
   const villa = data.villas.find((v) => v.id === id);
   const [tab, setTab] = useState<Tab>("overview");
-  const [editing, setEditing] = useState(false);
   const [access, setAccess] = useState(false);
 
   if (!villa) {
@@ -52,9 +51,6 @@ export default function VillaDetailPage() {
           <p className="mt-1 text-lg text-muted">{villa.location || "No location set"}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => setEditing(true)}>
-            <Pencil /> Edit villa
-          </Button>
           <Button variant={villa.accountStatus === "active" ? "danger" : "primary"} onClick={() => setAccess(true)}>
             {villa.accountStatus === "active" ? "Disable access" : "Enable access"}
           </Button>
@@ -78,7 +74,6 @@ export default function VillaDetailPage() {
       {tab === "subscription" ? <Subscription villa={villa} onAccess={() => setAccess(true)} /> : null}
       {tab === "activity" ? <ActivityList entries={data.activity.filter((a) => a.villaId === villa.id)} /> : null}
 
-      <EditVillaSheet villa={villa} open={editing} onClose={() => setEditing(false)} />
       <AccessModal villa={villa} open={access} onClose={() => setAccess(false)} />
     </div>
   );
@@ -148,8 +143,6 @@ function Overview({ villa }: { villa: AdminVilla }) {
 
 function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<AdminUser | null>(null);
-  const [resetting, setResetting] = useState<AdminUser | null>(null);
   const [toggling, setToggling] = useState<AdminUser | null>(null);
   const { act, notify } = useAdmin();
   // For an owner who can't receive the confirmation email: you vouch for the address instead.
@@ -187,17 +180,11 @@ function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
               <div className="mt-2 text-sm text-muted">Last login: {fmtStamp(u.lastLoginAt)}</div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={() => setEditing(u)}>
-                <Pencil /> Edit admin
-              </Button>
               {u.emailVerified ? null : (
                 <Button variant="secondary" size="sm" onClick={() => markVerified(u)}>
                   <MailCheck /> Mark email confirmed
                 </Button>
               )}
-              <Button variant="secondary" size="sm" onClick={() => setResetting(u)}>
-                <KeyRound /> Reset password
-              </Button>
               <Button variant={u.status === "active" ? "danger" : "secondary"} size="sm" onClick={() => setToggling(u)}>
                 {u.status === "active" ? "Disable admin" : "Enable admin"}
               </Button>
@@ -212,8 +199,6 @@ function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
       </Button>
 
       <AdminUserModal villaId={villa.id} open={adding} onClose={() => setAdding(false)} />
-      {editing ? <AdminUserModal villaId={villa.id} user={editing} open onClose={() => setEditing(null)} /> : null}
-      {resetting ? <ResetPasswordModal user={resetting} open onClose={() => setResetting(null)} /> : null}
       {toggling ? <AdminStatusModal user={toggling} open onClose={() => setToggling(null)} /> : null}
     </div>
   );

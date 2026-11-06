@@ -40,7 +40,8 @@ export const EMAIL_KIND_LABEL: Record<EmailKind, string> = {
 
 type Loaded = { mail: MailSettings; log: EmailLogEntry[]; canStoreSecrets: boolean; appUrlSet: boolean };
 
-export function EmailSettings() {
+/** One part of the email settings, each shown on its own tab. */
+export function EmailSettings({ part }: { part: "server" | "owners" | "log" }) {
   const { act, notify } = useAdmin();
   const { me } = useAdminData();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -108,6 +109,49 @@ export function EmailSettings() {
     notify(on ? "Email switched on" : "Email switched off");
   };
 
+  if (part === "owners") {
+    return (
+      <AdminCard className="divide-y divide-line">
+        {OWNER_EMAILS.map((e) => (
+          <div key={e.key} className="flex items-center gap-4 px-5 py-4">
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium">{e.label}</span>
+              <span className="block text-sm text-muted">{e.hint}</span>
+            </span>
+            <Toggle checked={draft.emails[e.key]} onChange={(on) => toggle(e.key, on)} label={`${e.label} email`} />
+          </div>
+        ))}
+        {configured ? null : <p className="bg-amber-soft px-5 py-3 text-[0.9375rem] text-amber-deep">These only go out once the email server is set up.</p>}
+      </AdminCard>
+    );
+  }
+
+  if (part === "log") {
+    return (
+      <AdminCard className="divide-y divide-line overflow-hidden">
+        {loaded.log.length === 0 ? <p className="p-5 text-muted">No emails sent yet.</p> : null}
+        {loaded.log.slice(0, 15).map((m) => (
+          <div key={m.id} className="flex items-start gap-3 px-5 py-3.5">
+            <span
+              aria-hidden
+              className={cn("mt-2 size-2.5 shrink-0 rounded-full", m.status === "sent" ? "bg-sage" : m.status === "failed" ? "bg-clay" : "bg-stone")}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{m.subject}</span>
+              <span className="block truncate text-sm text-muted">
+                {EMAIL_KIND_LABEL[m.kind] ?? m.kind} · {m.to} · {fmtStamp(m.createdAt)}
+              </span>
+              {m.error ? <span className="mt-1 block text-sm break-words text-clay">{m.error}</span> : null}
+            </span>
+            <span className={cn("shrink-0 text-sm font-medium", m.status === "sent" ? "text-sage" : m.status === "failed" ? "text-clay" : "text-muted")}>
+              {m.status === "sent" ? "Sent" : m.status === "failed" ? "Failed" : "Not sent"}
+            </span>
+          </div>
+        ))}
+      </AdminCard>
+    );
+  }
+
   return (
     <>
       <AdminCard className="space-y-5 p-5 sm:p-6">
@@ -115,7 +159,7 @@ export function EmailSettings() {
           <span aria-hidden className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", configured ? "bg-sage" : "bg-amber")} />
           <p className="text-[0.9375rem] text-muted">
             {configured
-              ? "Email is set up. Password reset links and the emails switched on below go out from this server."
+              ? "Email is set up. Password reset links and the owner emails that are switched on go out from this server."
               : "Email is not set up yet. Until it is, villa owners can't reset a forgotten password by email and no emails go out."}
           </p>
         </div>
@@ -201,41 +245,6 @@ export function EmailSettings() {
         </div>
       </AdminCard>
 
-      <h3 className="mt-8 mb-3 text-lg font-semibold">Emails to villa owners</h3>
-      <AdminCard className="divide-y divide-line">
-        {OWNER_EMAILS.map((e) => (
-          <div key={e.key} className="flex items-center gap-4 px-5 py-4">
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium">{e.label}</span>
-              <span className="block text-sm text-muted">{e.hint}</span>
-            </span>
-            <Toggle checked={draft.emails[e.key]} onChange={(on) => toggle(e.key, on)} label={`${e.label} email`} />
-          </div>
-        ))}
-      </AdminCard>
-
-      <h3 className="mt-8 mb-3 text-lg font-semibold">Recent emails</h3>
-      <AdminCard className="divide-y divide-line overflow-hidden">
-        {loaded.log.length === 0 ? <p className="p-5 text-muted">No emails sent yet.</p> : null}
-        {loaded.log.slice(0, 15).map((m) => (
-          <div key={m.id} className="flex items-start gap-3 px-5 py-3.5">
-            <span
-              aria-hidden
-              className={cn("mt-2 size-2.5 shrink-0 rounded-full", m.status === "sent" ? "bg-sage" : m.status === "failed" ? "bg-clay" : "bg-stone")}
-            />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-medium">{m.subject}</span>
-              <span className="block truncate text-sm text-muted">
-                {EMAIL_KIND_LABEL[m.kind] ?? m.kind} · {m.to} · {fmtStamp(m.createdAt)}
-              </span>
-              {m.error ? <span className="mt-1 block text-sm break-words text-clay">{m.error}</span> : null}
-            </span>
-            <span className={cn("shrink-0 text-sm font-medium", m.status === "sent" ? "text-sage" : m.status === "failed" ? "text-clay" : "text-muted")}>
-              {m.status === "sent" ? "Sent" : m.status === "failed" ? "Failed" : "Not sent"}
-            </span>
-          </div>
-        ))}
-      </AdminCard>
     </>
   );
 }

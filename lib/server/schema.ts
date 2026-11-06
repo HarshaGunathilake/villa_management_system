@@ -227,6 +227,8 @@ const ADDED_COLUMNS: [table: string, column: string, ddl: string][] = [
   ["users", "email_unverified", "TINYINT(1) NOT NULL DEFAULT 0"],
   // 1 until a new villa owner has seen (or skipped) the first-time guide. Existing owners never see it.
   ["users", "tour_pending", "TINYINT(1) NOT NULL DEFAULT 0"],
+  // The name the product was given in Dodo (shown on the checkout page), so it can follow the platform name.
+  ["dodo_products", "name", "VARCHAR(120) NULL"],
 ];
 
 const ADDED_INDEXES: [table: string, name: string, ddl: string][] = [

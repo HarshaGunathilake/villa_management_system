@@ -186,3 +186,46 @@ html:has(.landing) {
     scroll-behavior: auto;
   }
 }
+
+/*
+ * Super Admin theme ("console"): cool greys and the LankaStay lagoon green, so
+ * the platform side never looks like a villa's own app. Set on <html> by
+ * components/admin/admin-app.tsx, so sheets and dialogs (rendered in portals)
+ * pick it up too. Every utility reads these variables, so nothing else changes.
+ */
+.admin-theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-sand: #f2f5f4;
+  --color-ink: #0e1a19;
+  --color-muted: #586664;
+  --color-card: #ffffff;
+  --color-well: #e9eeec;
+  --color-line: #e1e7e5;
+  --color-line-strong: #cad4d1;
+  --color-brass: #0b5d50;
+  --color-brass-deep: #0b5d50;
+  --color-brass-soft: #dcebe7;
+  --color-sage: #2c8a5c;
+  --color-sage-deep: #1d6a45;
+  --color-sage-soft: #e0f1e7;
+  --color-amber: #c27c1e;
+  --color-amber-deep: #8a5410;
+  --color-amber-soft: #fbefdc;
+  --color-dusk: #335d8a;
+  --color-dusk-soft: #e2eaf3;
+  --color-clay: #b4473a;
+  --color-clay-soft: #f8e5e2;
+  --color-stone: #7b8886;
+  --color-stone-soft: #eaeeed;
+  --radius-card: 1.125rem;
+  --shadow-card: 0 1px 2px rgb(14 26 25 / 0.05), 0 1px 1px rgb(14 26 25 / 0.03);
+  --shadow-float: 0 18px 44px -18px rgb(4 30 26 / 0.38);
+}
+.admin-theme body {
+  font-feature-settings: "cv11", "ss01";
+}
+.admin-theme main h1,
+.admin-theme main h2 {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}

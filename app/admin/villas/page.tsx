@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { AdminCard, AdminHeader, fmtDate, fmtStamp, relativeDay, TabBar, VillaStatusBadge } from "@/components/admin/ui";
-import { AccessModal, CreateVillaSheet, EditVillaSheet } from "@/components/admin/villa-forms";
+import { AccessModal, CreateVillaSheet } from "@/components/admin/villa-forms";
 import { Button } from "@/components/ui/button";
 import { useAdminData } from "@/lib/admin-store";
 import { villaBadge, type AdminVilla, type VillaBadge } from "@/lib/admin-types";
@@ -18,7 +18,6 @@ export default function VillasPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [plan, setPlan] = useState("all");
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<AdminVilla | null>(null);
   const [access, setAccess] = useState<AdminVilla | null>(null);
 
   const adminOf = (villaId: string) => admins.find((a) => a.villaId === villaId);
@@ -127,9 +126,6 @@ export default function VillasPage() {
                     <Link href={`/admin/villas/${v.id}`} className="inline-flex min-h-10 items-center rounded-[0.625rem] border border-line-strong bg-card px-3.5 text-[0.9375rem] font-medium hover:bg-well">
                       View
                     </Link>
-                    <Button variant="secondary" size="sm" onClick={() => setEditing(v)}>
-                      Edit
-                    </Button>
                     <Button variant={v.accountStatus === "active" ? "danger" : "secondary"} size="sm" onClick={() => setAccess(v)}>
                       {v.accountStatus === "active" ? "Disable" : "Enable"}
                     </Button>
@@ -142,7 +138,6 @@ export default function VillasPage() {
       )}
 
       <CreateVillaSheet open={creating} onClose={() => setCreating(false)} />
-      {editing ? <EditVillaSheet villa={editing} open onClose={() => setEditing(null)} /> : null}
       {access ? <AccessModal villa={access} open onClose={() => setAccess(null)} /> : null}
     </div>
   );

@@ -147,77 +147,6 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* -------------------------------------------------------------- edit a villa */
-
-export function EditVillaSheet({ villa, open, onClose }: { villa: AdminVilla; open: boolean; onClose: () => void }) {
-  return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="Edit villa" className="sm:w-[34rem]">
-      {open ? <EditVillaForm key={villa.id} villa={villa} onClose={onClose} /> : null}
-    </Sheet>
-  );
-}
-
-function EditVillaForm({ villa, onClose }: { villa: AdminVilla; onClose: () => void }) {
-  const paidByCard = ["active", "on_hold", "past_due", "paused"].includes(villa.card.status ?? "");
-  const { act, notify } = useAdmin();
-  const [draft, setDraft] = useState({
-    name: villa.name, location: villa.location, phone: villa.phone, email: villa.email, address: villa.address, description: villa.description,
-    plan: villa.plan, subscriptionStartDate: villa.subscriptionStartDate, nextPaymentDate: villa.nextPaymentDate,
-  });
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const set = (key: keyof typeof draft) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setDraft({ ...draft, [key]: e.target.value });
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    // Only send what changed, so the activity log can tell a subscription change from a details change.
-    const patch = Object.fromEntries(Object.entries(draft).filter(([k, val]) => val !== (villa as unknown as Record<string, unknown>)[k]));
-    const result = Object.keys(patch).length === 0 ? { ok: true as const } : await act({ type: "updateVilla", id: villa.id, patch });
-    setBusy(false);
-    if (!result.ok) return setError(result.error);
-    notify("Villa updated");
-    onClose();
-  };
-
-  return (
-    <form onSubmit={save} className="space-y-8" noValidate>
-      <section className="space-y-4">
-        <h3 className="text-lg font-semibold">Villa information</h3>
-        <Field label="Villa name">{(id) => <Input id={id} value={draft.name} onChange={set("name")} />}</Field>
-        <Field label="Location">{(id) => <Input id={id} value={draft.location} onChange={set("location")} />}</Field>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Phone">{(id) => <Input id={id} type="tel" value={draft.phone} onChange={set("phone")} />}</Field>
-          <Field label="Email" optional>{(id) => <Input id={id} type="email" value={draft.email} onChange={set("email")} />}</Field>
-        </div>
-        <Field label="Address" optional>{(id) => <Input id={id} value={draft.address} onChange={set("address")} />}</Field>
-        <Field label="Description" optional>{(id) => <Textarea id={id} value={draft.description} onChange={set("description")} className="min-h-20" />}</Field>
-      </section>
-      <section className="space-y-4">
-        <h3 className="text-lg font-semibold">Subscription</h3>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Plan">{(id) => <Input id={id} value={draft.plan} onChange={set("plan")} />}</Field>
-          <div>
-            <div className="mb-2 font-medium">Monthly price</div>
-            <div className="tnum flex min-h-12 items-center rounded-xl bg-well px-4 font-semibold">{money(villa.monthlyAmount)}</div>
-            <p className="mt-1.5 text-sm text-muted">The same for every villa. Change it in Settings.</p>
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Subscription start date">{(id) => <Input id={id} type="date" value={draft.subscriptionStartDate} onChange={set("subscriptionStartDate")} />}</Field>
-          <Field label="Next payment due" hint={paidByCard ? "Set by Dodo, as this villa pays by card." : undefined}>
-            {(id) => <Input id={id} type="date" value={draft.nextPaymentDate} onChange={set("nextPaymentDate")} disabled={paidByCard} />}
-          </Field>
-        </div>
-      </section>
-      <FormError message={error} />
-      <Button type="submit" size="lg" block disabled={busy || draft.name.trim().length < 2}>
-        Save changes
-      </Button>
-    </form>
-  );
-}
-
 /* --------------------------------------------------- enable / disable access */
 
 export function AccessModal({ villa, open, onClose }: { villa: AdminVilla; open: boolean; onClose: () => void }) {
@@ -225,6 +154,7 @@ export function AccessModal({ villa, open, onClose }: { villa: AdminVilla; open:
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const disabling = villa.accountStatus === "active";
+  const paidByCard = ["active", "on_hold", "past_due", "paused"].includes(villa.card.status ?? "");
 
   const confirm = async () => {
     setBusy(true);
@@ -245,11 +175,16 @@ export function AccessModal({ villa, open, onClose }: { villa: AdminVilla; open:
       {disabling ? (
         <>
           <p>{villa.name} will no longer be accessible to its admin users.</p>
+          {paidByCard ? <p className="font-medium">Their card subscription is cancelled now, so they won&apos;t be charged again.</p> : null}
           <p className="text-muted">The villa&apos;s bookings, guests, rooms and other data will remain stored.</p>
           <p className="text-muted">You can re-enable access at any time.</p>
         </>
       ) : (
-        <p>The villa admin will be able to log in and use the system again.</p>
+        villa.card.customerId ? (
+          <p>The villa admin will be able to log in again. If their card subscription has ended, they&apos;ll be asked to pay before they can use the system.</p>
+        ) : (
+          <p>The villa admin will be able to log in and use the system again.</p>
+        )
       )}
       <FormError message={error} />
     </Modal>
@@ -258,29 +193,29 @@ export function AccessModal({ villa, open, onClose }: { villa: AdminVilla; open:
 
 /* ------------------------------------------------------------- admin users */
 
-export function AdminUserModal({ villaId, user, open, onClose }: { villaId: string; user?: AdminUser; open: boolean; onClose: () => void }) {
+export function AdminUserModal({ villaId, open, onClose }: { villaId: string; open: boolean; onClose: () => void }) {
   return (
-    <Modal open={open} onOpenChange={(o) => !o && onClose()} title={user ? "Edit admin" : "Add admin"} footer={null}>
-      {open ? <AdminUserForm key={user?.id ?? "new"} villaId={villaId} user={user} onClose={onClose} /> : null}
+    <Modal open={open} onOpenChange={(o) => !o && onClose()} title="Add admin" footer={null}>
+      {open ? <AdminUserForm villaId={villaId} onClose={onClose} /> : null}
     </Modal>
   );
 }
 
-function AdminUserForm({ villaId, user, onClose }: { villaId: string; user?: AdminUser; onClose: () => void }) {
+function AdminUserForm({ villaId, onClose }: { villaId: string; onClose: () => void }) {
   const { act, notify } = useAdmin();
-  const [name, setName] = useState(user?.name ?? "");
-  const [email, setEmail] = useState(user?.email ?? "");
-  const [phone, setPhone] = useState(user?.phone ?? "");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const save = async () => {
     setBusy(true);
-    const result = user ? await act({ type: "updateAdmin", id: user.id, name, email, phone }) : await act({ type: "createAdmin", villaId, name, email, phone, password });
+    const result = await act({ type: "createAdmin", villaId, name, email, phone, password });
     setBusy(false);
     if (!result.ok) return setError(result.error);
-    notify(user ? "Admin updated" : "Admin added");
+    notify("Admin added");
     onClose();
   };
 
@@ -289,59 +224,14 @@ function AdminUserForm({ villaId, user, onClose }: { villaId: string; user?: Adm
       <Field label="Name">{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" />}</Field>
       <Field label="Email">{(id) => <Input id={id} type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" />}</Field>
       <Field label="Phone" optional>{(id) => <Input id={id} type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} autoComplete="off" />}</Field>
-      {user ? null : (
-        <Field label="Password" hint="At least 8 characters">{(id) => <PasswordInput id={id} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />}</Field>
-      )}
+      <Field label="Password" hint="At least 8 characters">{(id) => <PasswordInput id={id} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />}</Field>
       <FormError message={error} />
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button onClick={save} disabled={busy || name.trim().length < 2 || !email.includes("@") || (!user && password.length < 8)}>
-          {user ? "Save changes" : "Add admin"}
-        </Button>
-      </div>
-    </>
-  );
-}
-
-export function ResetPasswordModal({ user, open, onClose }: { user: AdminUser; open: boolean; onClose: () => void }) {
-  return (
-    <Modal open={open} onOpenChange={(o) => !o && onClose()} title="Reset password" footer={null}>
-      {open ? <ResetPasswordForm key={user.id} user={user} onClose={onClose} /> : null}
-    </Modal>
-  );
-}
-
-function ResetPasswordForm({ user, onClose }: { user: AdminUser; onClose: () => void }) {
-  const { act, notify } = useAdmin();
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    if (password !== confirm) return setError("The two passwords do not match.");
-    setBusy(true);
-    const result = await act({ type: "resetPassword", id: user.id, password });
-    setBusy(false);
-    if (!result.ok) return setError(result.error);
-    notify("Password reset");
-    onClose();
-  };
-
-  return (
-    <>
-      <p className="text-muted">Set a new password for {user.name}. They are signed out everywhere and must use the new one.</p>
-      <Field label="New password" hint="At least 8 characters">{(id) => <PasswordInput id={id} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />}</Field>
-      <Field label="Confirm new password">{(id) => <PasswordInput id={id} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />}</Field>
-      <FormError message={error} />
-      <div className="flex justify-end gap-2 pt-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button onClick={save} disabled={busy || password.length < 8}>
-          Reset password
+        <Button onClick={save} disabled={busy || name.trim().length < 2 || !email.includes("@") || password.length < 8}>
+          Add admin
         </Button>
       </div>
     </>

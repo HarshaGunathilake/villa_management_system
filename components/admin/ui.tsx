@@ -92,8 +92,8 @@ export function AdminHeader({ title, subtitle, action }: { title: string; subtit
 export function StatTile({ label, value, note, tone }: { label: string; value: React.ReactNode; note?: string; tone?: "warn" }) {
   return (
     <AdminCard className="p-5">
-      <div className="text-muted">{label}</div>
-      <div className={cn("tnum mt-1 text-[2rem] leading-none font-semibold", tone === "warn" && "text-amber-deep")}>{value}</div>
+      <div className="text-[0.9375rem] text-muted">{label}</div>
+      <div className={cn("tnum mt-2 font-display text-[1.75rem] leading-none font-bold tracking-[-0.02em] sm:text-[2rem]", tone === "warn" && "text-amber-deep")}>{value}</div>
       {note ? <div className="mt-1.5 text-sm text-muted">{note}</div> : null}
     </AdminCard>
   );
