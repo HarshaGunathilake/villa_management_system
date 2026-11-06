@@ -9,6 +9,7 @@ import {
   Check,
   ClipboardList,
   ConciergeBell,
+  CreditCard,
   Home,
   LogOut,
   Menu,
@@ -18,6 +19,8 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
+import { AccessDisabled, ServerUnavailable, SubscriptionEnded } from "@/components/access-screens";
+import { AdminApp } from "@/components/admin/admin-app";
 import { BookingSheet } from "@/components/booking-sheet";
 import { ExpenseSheet } from "@/components/expense-sheet";
 import { GuestFormSheet, GuestSheet } from "@/components/guest-sheets";
@@ -38,6 +41,7 @@ const MORE = [
   { href: "/rooms", label: "Rooms", icon: BedDouble },
   { href: "/amenities", label: "Amenities", icon: ConciergeBell },
   { href: "/settings", label: "Villa settings", icon: Settings },
+  { href: "/subscription", label: "Subscription", icon: CreditCard },
 ];
 
 export function useStartBooking() {
@@ -52,6 +56,9 @@ export function useStartBooking() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  // The Super Admin area is a separate app with its own sign-in and data. Villa data is never loaded there.
+  if (pathname.startsWith("/admin")) return <AdminApp>{children}</AdminApp>;
   return (
     <StoreProvider>
       <Frame>{children}</Frame>
@@ -62,16 +69,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 function Frame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { ready, villa, toast, signedIn, signOut } = useStore();
+  const { ready, villa, toast, signedIn, signOut, access, support, renewal, accessError, reload } = useStore();
   const startBooking = useStartBooking();
   const onLogin = pathname === "/login";
 
   // Nothing in the app opens without signing in first.
   useEffect(() => {
-    if (!ready) return;
-    if (!signedIn && !onLogin) router.replace("/login");
+    if (access === "signed_out" && !onLogin) router.replace("/login");
     if (signedIn && onLogin) router.replace("/");
-  }, [ready, signedIn, onLogin, router]);
+  }, [access, signedIn, onLogin, router]);
+
+  if (access === "error") return <ServerUnavailable message={accessError} onRetry={() => void reload()} />;
+
+  // The card subscription ended: the only thing left to do is pay again.
+  if (access === "lapsed") return <SubscriptionEnded support={support} renewal={renewal} onSignOut={signOut} onCheckAgain={reload} />;
 
   if (onLogin) {
     return (
@@ -81,6 +92,9 @@ function Frame({ children }: { children: React.ReactNode }) {
       </>
     );
   }
+
+  // Switched off by the Super Admin: nothing of the villa is shown.
+  if (access === "disabled") return <AccessDisabled support={support} onSignOut={signOut} />;
 
   if (!ready || !signedIn) {
     return (
@@ -110,7 +124,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh lg:pl-64">
       {/* Sidebar, large screens */}
-      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-line bg-card/60 px-4 py-6 lg:flex">
+      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col overflow-y-auto border-r border-line bg-card/60 px-4 py-6 lg:flex">
         <Link href="/" className="rounded-xl px-3 py-1">
           <div className="text-xl font-semibold tracking-tight">{villa.name}</div>
           <div className="text-sm text-muted">{villa.location}</div>

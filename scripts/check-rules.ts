@@ -2,6 +2,7 @@
 // Proves the booking rules and the five prototype scenarios against the demo data.
 import assert from "node:assert/strict";
 import { checkAvailability, roomNight } from "../lib/availability";
+import { currentPeriod, shiftMonths } from "../lib/admin-logic";
 import { monthSummary } from "../lib/finance";
 import { createSeed } from "../lib/seed";
 import type { Booking } from "../lib/types";
@@ -141,6 +142,19 @@ test("monthly summary adds up", () => {
   assert.equal(m.occupiedNights + m.availableNights, m.totalRoomNights);
   assert.equal(m.profit, m.revenue - m.expenses);
   console.log(`      October: revenue ${m.revenue}, expenses ${m.expenses}, bookings ${m.bookings}, occupied ${m.occupiedNights}/${m.totalRoomNights}`);
+});
+
+test("subscription periods follow the due date", () => {
+  assert.equal(shiftMonths("2026-01-31", 1), "2026-02-28");
+  assert.equal(shiftMonths("2026-10-04", 1), "2026-11-04");
+  // due on 4 Nov: today 4 Oct sits in 4 Oct to 3 Nov
+  assert.deepEqual(currentPeriod("2026-11-04", "2026-10-04"), { start: "2026-10-04", end: "2026-11-03" });
+  // paid two months ahead: the current period is still the one containing today
+  assert.deepEqual(currentPeriod("2026-12-04", "2026-10-04"), { start: "2026-10-04", end: "2026-11-03" });
+  // late: due 30 Sept, today 4 Oct sits in the unpaid period 30 Sept to 29 Oct
+  assert.deepEqual(currentPeriod("2026-09-30", "2026-10-04"), { start: "2026-09-30", end: "2026-10-29" });
+  // long overdue: due 30 Aug, today 4 Oct is in the second unpaid period
+  assert.deepEqual(currentPeriod("2026-08-30", "2026-10-04"), { start: "2026-09-30", end: "2026-10-29" });
 });
 
 console.log(`\n${passed} checks passed`);

@@ -1,19 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { LogIn, LogOut, Plus, Receipt, UserPlus } from "lucide-react";
+import { CreditCard, LogIn, LogOut, Plus, Receipt, UserPlus } from "lucide-react";
 import { Card, SectionTitle, useStartBooking } from "@/components/app-shell";
 import { BookingRow } from "@/components/booking-bits";
 import { Photo } from "@/components/photo";
+import { SubscriptionCard } from "@/components/subscription-card";
 import { Button } from "@/components/ui/button";
 import { VillaStrip } from "@/components/villa-strip";
 import { bookingPhase, coversNight, guestCount, isActive, roomNight } from "@/lib/availability";
-import { fmtDay, fmtLong, fmtMonthLong, monthKey } from "@/lib/dates";
+import { fmtDay, fmtLong, fmtMonthLong, monthKey, nightsBetween } from "@/lib/dates";
 import { monthSummary } from "@/lib/finance";
 import { PHOTOS } from "@/lib/photos";
 import { useLookups, useStore } from "@/lib/store";
-import type { Booking } from "@/lib/types";
+import type { Booking, VillaSubscription } from "@/lib/types";
 import { money, plural } from "@/lib/utils";
+
+/** A short line for the top of the home screen when the subscription needs attention, otherwise nothing. */
+function subscriptionNotice(s: VillaSubscription, today: string) {
+  const days = nightsBetween(today, s.nextPaymentDate);
+  if (s.status === "overdue") return "Your subscription payment is overdue.";
+  if (s.status === "payment_due") return "Your subscription payment is due.";
+  if (days < 0) return `Your subscription payment was due ${-days} ${-days === 1 ? "day" : "days"} ago.`;
+  if (days === 0) return "Your subscription payment is due today.";
+  if (days <= 7) return `Your subscription payment is due in ${days} ${days === 1 ? "day" : "days"}.`;
+  return null;
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -24,7 +36,7 @@ function greeting() {
 
 export default function HomePage() {
   const store = useStore();
-  const { today, villa, bookings, rooms, expenses } = store;
+  const { today, villa, bookings, rooms, expenses, subscription } = store;
 
   const active = bookings.filter(isActive);
   const arrivals = active.filter((b) => b.checkIn === today);
@@ -52,13 +64,46 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/5" />
         <div className="relative flex min-h-52 flex-col justify-end p-5 text-white sm:min-h-60 sm:p-8">
           <h1 className="text-[1.875rem] leading-tight font-semibold sm:text-[2.5rem]">
-            {greeting()}, {villa.ownerName}
+            {greeting()}, {villa.ownerName.split(" ")[0]}
           </h1>
           <p className="mt-1 text-lg text-white/85">
             {villa.name}, {fmtLong(today)}
           </p>
         </div>
       </header>
+
+      {subscription && subscriptionNotice(subscription, today) ? (
+        <Link
+          href="/subscription"
+          className={`mb-6 flex items-center gap-3 rounded-card border px-5 py-3.5 font-medium ${subscription.status === "overdue" ? "border-clay/30 bg-clay-soft text-clay" : "border-amber/40 bg-amber-soft text-amber-deep"}`}
+        >
+          <CreditCard className="size-5 shrink-0" aria-hidden />
+          <span className="flex-1">
+            {subscriptionNotice(subscription, today)}
+            <span className="font-normal"> {money(subscription.monthlyAmount)} a month.</span>
+          </span>
+          <span className="shrink-0 underline underline-offset-4">Details</span>
+        </Link>
+      ) : null}
+
+      {rooms.length === 0 || villa.price === 0 ? (
+        <section className="mb-8 rounded-card border border-brass/40 bg-brass-soft p-5">
+          <h2 className="text-xl font-semibold">Finish setting up your villa</h2>
+          <p className="mt-1 text-[0.9375rem]">Bookings need at least one room and a price for the entire villa.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {rooms.length === 0 ? (
+              <Link href="/rooms" className="inline-flex min-h-12 items-center rounded-xl bg-ink px-5 font-medium text-white hover:bg-black">
+                Add your rooms
+              </Link>
+            ) : null}
+            {villa.price === 0 ? (
+              <Link href="/settings" className="inline-flex min-h-12 items-center rounded-xl border border-line-strong bg-card px-5 font-medium hover:bg-well">
+                Set the entire villa price
+              </Link>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section aria-label="Today in numbers" className="mb-8 grid grid-cols-2 overflow-hidden rounded-card border border-line bg-card shadow-card sm:grid-cols-4">
         {stats.map((s, i) => (
@@ -192,6 +237,13 @@ export default function HomePage() {
               {recentExpenses.length === 0 ? <p className="p-5 text-muted">No expenses added yet.</p> : null}
             </Card>
           </section>
+
+          {subscription ? (
+            <section id="subscription" className="scroll-mt-6">
+              <SectionTitle>Your subscription</SectionTitle>
+              <SubscriptionCard />
+            </section>
+          ) : null}
         </div>
       </div>
     </div>

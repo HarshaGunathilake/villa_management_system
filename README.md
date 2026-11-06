@@ -1,91 +1,170 @@
-# Villa Serenity — villa management prototype
+# Villa Stay Manager
 
-A simple booking, guest and expense app for a small villa that can be booked two ways:
-the **entire villa**, or **one room at a time**. Built mobile-first for an owner who is not
-comfortable with technology.
+A booking, guest and expense app for small villas, run as a monthly-subscription service for
+many villas at once.
+
+- **Villa Admin** (the customer) signs in at `/login` and manages one villa: bookings (entire
+  villa or room by room), calendar, guests, expenses, amenities, rooms, invoices.
+- **Super Admin** (the platform owner) signs in at `/admin/login` and manages the customers:
+  villas, admin accounts, manual subscription status, and who has access.
+
+Each villa is a separate tenant. A villa admin can only ever reach their own villa's data.
 
 ## Run it
 
+You need Node 20.9 or newer and a MySQL or MariaDB server (XAMPP's MySQL is fine).
+
 ```bash
 npm install
+copy .env.example .env.local     # macOS/Linux: cp .env.example .env.local
+npm run db:setup                 # creates the database, tables and first accounts
 npm run dev
 ```
 
-Open http://localhost:3000. Requires Node 20.9 or newer.
+Open http://localhost:3000.
 
-Sign in with the demo details shown on the sign-in screen (`owner@villaserenity.lk` /
-`serenity2026`, set in `lib/auth.ts`).
+`.env.local` holds the database settings. The defaults (`root`, no password, database
+`villa_management` on `127.0.0.1:3306`) match a standard XAMPP install; change them if yours
+differ. The database and tables are also created automatically the first time the app is
+used, so `db:setup` is optional. `npm run db:reset` wipes everything and starts again from the
+sample data.
 
-> The sign-in is a prototype: the check happens in the browser and there are no real
-> accounts. Replace `lib/auth.ts` with real authentication before storing real guest data.
+### Accounts created on first run
 
-There is no backend. Everything is mock data kept in the browser (localStorage), so
-bookings you make stay after a refresh. **More → Villa settings → Reset sample data**
-starts again.
+| Who | Where | Email | Password |
+| --- | --- | --- | --- |
+| Super Admin | `/admin/login` | `admin@villaplatform.lk` | `superadmin2026` |
+| Villa Serenity (full sample data) | `/login` | `owner@villaserenity.lk` | `serenity2026` |
+| Ocean Breeze Villa | `/login` | `admin@oceanbreeze.lk` | `oceanbreeze2026` |
+| Palm Garden Villa (payment due) | `/login` | `admin@palmgarden.lk` | `palmgarden2026` |
+| Lagoon Edge Villa (disabled) | `/login` | `admin@lagoonedge.lk` | `lagoonedge2026` |
+
+The Super Admin email and password come from `SUPER_ADMIN_EMAIL` / `SUPER_ADMIN_PASSWORD` in
+`.env.local`. **Before going live:** set your own Super Admin password, and set
+`SEED_DEMO=false` so the sample villas are not created.
+
+While developing (`npm run dev`) the villa sign-in form is pre-filled with the Villa Serenity
+account. Production builds do not pre-fill anything.
+
+## How access works
+
+```
+Villa Admin signs in  ->  is the user active?  ->  is the villa active?  ->  allowed
+```
+
+| User | Villa | Result |
+| --- | --- | --- |
+| Active | Active | Allowed |
+| Disabled | Active | Blocked |
+| Active | Disabled | Blocked |
+| Disabled | Disabled | Blocked |
+
+Both checks run on **every** request, not only at sign-in, so switching a villa or a user off
+takes effect at once (their sessions are also ended). A blocked admin sees "Access temporarily
+unavailable" with the support contact from Super Admin → Settings, and nothing about payments.
+
+A villa admin sees their own subscription on the home screen and in the **Subscription** tab
+(plan, monthly amount, status, next payment date and every payment recorded), read-only. Internal notes stay with the Super
+Admin.
+
+Payment status (Active / Payment due / Overdue) and access (Active / Disabled) are separate.
+Villas pay by card through Dodo Payments (next section); there is no "Mark as paid" any more.
+
+## Card payments (Dodo Payments)
+
+Each villa admin pays the villa's monthly amount by card from their **Subscription** page. The
+card form is Dodo's own checkout page; card details never reach this app.
+
+**Setup**
+
+1. In the Dodo dashboard, create an API key (Developer → API Keys).
+2. Add a webhook (Developer → Webhooks) pointing to `https://<your-site>/api/webhooks/dodo`,
+   subscribed to the `subscription.*` and `payment.*` events. Copy its signing key (`whsec_...`).
+3. Put both in `.env.local` with `DODO_PAYMENTS_ENVIRONMENT` and `APP_URL` (see `.env.example`).
+   Start in `test_mode` with test keys and Dodo's test cards, then switch to `live_mode` with
+   live keys and a live webhook.
+
+Until both keys are set, the Subscription page says card payments are not set up yet.
+
+**What happens**
+
+- The app creates one Dodo product per monthly amount (in LKR) the first time it is needed, and
+  reuses it. Changing a villa's amount moves its card subscription to the new price from the
+  next charge; nothing is charged at that moment.
+- Payments are recorded by themselves from Dodo's webhooks, and Dodo sets the next payment date
+  (it cannot be edited for a villa paying by card).
+- A failed renewal only changes the payment status (Payment due / Overdue); access stays on while
+  Dodo retries. The villa admin can update the card from the Subscription page.
+- When Dodo cancels or expires the subscription, access switches off by itself. The villa admin
+  can still sign in, but sees only "Your subscription has ended" with a button to pay again.
+  Access comes back as soon as the new payment goes through. Nothing is deleted.
+- A villa the Super Admin disables by hand stays off whatever Dodo says.
+- Webhooks are checked against the signing key, each one is handled once, and the subscription
+  is always re-read from Dodo, so retries and out-of-order delivery are safe.
+
+## Security, in short
+
+- **Tenant isolation is enforced on the server.** `requireVillaAdmin()` in
+  `lib/server/auth.ts` takes the villa from the signed-in user's own database row. No API
+  accepts a villa id from the browser, and every villa table is keyed by `(villa_id, id)`, so
+  a record id from another villa simply does not exist for you.
+- **Roles are separate doors.** `/api/villa/*` needs a villa session, `/api/admin/*` needs a
+  Super Admin session; they use different cookies and a villa account cannot sign in to the
+  admin area or the other way round.
+- **Passwords** are stored only as salted scrypt hashes. Sessions are random tokens in
+  httpOnly, SameSite=Lax cookies (HTTPS-only in production); only a hash of the token is
+  stored. Repeated wrong passwords lock that email for ten minutes.
+- **Booking rules are checked again on the server** (double bookings, villa versus room,
+  check-in and check-out times, no check-out with a balance), inside a transaction that locks
+  the villa, so two requests cannot both take the same nights.
+- Changes are accepted only as JSON from the app's own origin.
+
+Not included yet, and worth adding before real customers: HTTPS and a reverse proxy,
+database backups, an email-based password reset, and rate limiting that survives a server
+restart (the current lock is kept in memory).
 
 ## The booking rules
 
-All of the availability logic lives in [`lib/availability.ts`](lib/availability.ts):
+In `lib/availability.ts`, used by both the screens and the server:
 
 1. An entire-villa booking blocks every room for its dates.
 2. Any room booking blocks the entire villa for its dates.
 3. Different rooms can be booked for the same dates.
 4. The same room can never be booked twice for overlapping dates.
-
-5. On a changeover day, the leaving guest's check-out time cannot be later than the
-   arriving guest's check-in time.
-
-A stay covers the nights from check-in up to (not including) check-out, so one guest can
-check out in the morning and another can check in that afternoon.
-
-Check-out goes through a final bill: extra items can be added, and a guest cannot be
-checked out while a balance remains (`checkOut` in `lib/store.tsx` refuses).
-
-Each booking can carry its own check-in and check-out times and, for the entire villa, its
-own nightly price. Both are set while making the booking and change that booking only; the
-usual times and prices stay in Villa settings.
+5. On a changeover day, the leaving guest's check-out time cannot be later than the arriving
+   guest's check-in time.
 
 ```bash
-npm run check:rules   # proves the rules and the five prototype scenarios against the demo data
+npm run check:rules   # proves the rules against the sample data (no database needed)
 ```
-
-The same check runs every time a booking is created or edited (`lib/store.tsx`), so a
-conflicting booking cannot be saved from any screen.
 
 ## Where things are
 
 | Path | What it is |
 | --- | --- |
-| `app/page.tsx` | Home: today's numbers, availability, check-ins and check-outs, payments pending |
-| `app/login/page.tsx`, `lib/auth.ts` | Sign-in screen and the prototype session check |
-| `app/bookings/new/page.tsx` | New booking in four steps, with live availability |
-| `app/calendar/page.tsx` | Visual calendar: one row for the villa, one per room |
-| `app/bookings`, `app/guests`, `app/expenses`, `app/money`, `app/rooms`, `app/settings` | The remaining pages |
-| `app/amenities/page.tsx`, `components/extras.tsx` | Amenities (BBQ, meals, pickup) and adding them to a booking |
-| `components/stay-times.tsx` | Per-booking check-in and check-out times, with same-day neighbours |
-| `app/document/page.tsx`, `lib/documents.ts` | Printable booking confirmation and invoice (print or save as PDF) |
-| `components/villa-strip.tsx` | The "villa over its rooms" availability widget |
-| `components/booking-sheet.tsx` | Booking details, check in/out, payments, edit, cancel |
-| `components/ui/*` | Small shadcn-style building blocks (button, sheet, fields, badges) |
-| `lib/seed.ts` | Demo data. Dates are offsets from today so the dashboard is always alive |
-| `lib/finance.ts` | Monthly revenue, expenses, occupied nights |
-| `app/globals.css` | Design tokens (colours, radius, shadows) |
+| `lib/server/schema.ts` | Database tables: villas, users, sessions, subscription_payments, activity_log, platform_settings, and the per-villa tables |
+| `lib/server/auth.ts` | Password hashing, sessions, `requireVillaAdmin()` / `requireSuperAdmin()` |
+| `lib/server/tenant.ts` | Everything a villa admin can read or change, always filtered by villa |
+| `lib/server/admin.ts` | Everything the Super Admin can read or change, with the activity log |
+| `lib/server/seed.ts` | First-run accounts and sample villas |
+| `app/api/auth/*`, `app/api/villa/*`, `app/api/admin/*` | The API routes |
+| `proxy.ts` | Sends browsers with no session cookie to the right sign-in page |
+| `lib/store.tsx` | Villa screens' data: loads from the API, shows changes at once, saves them in order |
+| `app/admin/*`, `components/admin/*`, `lib/admin-store.tsx` | The Super Admin area |
+| `app/*` (everything else) | The villa app: home, calendar, bookings, guests, expenses, money, rooms, amenities, settings, documents |
+| `lib/availability.ts`, `lib/finance.ts` | Booking rules and monthly figures, shared by browser and server |
 
-## Demo data
+## Database tables
 
-Dates are seeded relative to the day you first open the app. Opened on 4 Oct 2026 they match
-the brief exactly: Sarah Fernando has the entire villa Oct 10–13, Michael Wilson has Ocean
-View Oct 15–18 and Kasun Perera has the Garden Room Oct 16–18.
-
-## Photos
-
-Room and villa photos are loaded from Unsplash (`lib/photos.ts`) and need an internet
-connection; without one the app shows a plain warm tone instead. Photographers: Dinuka
-Lankaloka, Antonio Araujo, Tran Vinh, X F. Replace them with the villa's own photos by
-dropping files into `public/` and pointing `lib/photos.ts` at them.
+`villas` (profile, plan, monthly amount, `subscription_status`, `account_status`, start and
+next payment dates, internal notes) · `users` (`villa_id`, `role` = `super_admin` or
+`villa_admin`, `status`, `last_login_at`; several admins can belong to one villa) · `sessions`
+· `subscription_payments` (amount, payment date, period covered, note, who recorded it) ·
+`activity_log` · `platform_settings` · and per villa: `rooms`, `guests`, `bookings`,
+`expenses`, `amenities`.
 
 ## Not built (on purpose)
 
-Accounting, payroll, inventory, dynamic pricing, channel manager / OTA APIs, multiple
-properties, user permissions, notifications and real receipt storage (only the file name of
-an attached receipt is kept).
+Online payments, automatic suspension, email sending, logo or image uploads, accounting,
+channel-manager integrations and multiple subscription plans with different features (the
+`plan` field is a label only).

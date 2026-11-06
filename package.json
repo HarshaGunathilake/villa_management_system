@@ -7,13 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check:rules": "tsx scripts/check-rules.ts"
+    "check:rules": "tsx scripts/check-rules.ts",
+    "db:setup": "tsx scripts/db-setup.ts",
+    "db:reset": "tsx scripts/db-setup.ts --reset"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@radix-ui/react-dialog": "^1.1.23",
     "clsx": "^2.1.1",
     "lucide-react": "^1.52.0",
+    "mysql2": "^3.24.5",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",

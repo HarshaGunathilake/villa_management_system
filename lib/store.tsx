@@ -1,15 +1,12 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { api, type ApiFailure, type Renewal, type SupportContact } from "./api";
 import { checkAvailability, type Availability } from "./availability";
-import { checkLogin, clearSession, readSession, writeSession } from "./auth";
 import { todayISO } from "./dates";
-import { DEFAULT_CHECK_IN, DEFAULT_CHECK_OUT, fmtTime, normalizeTime } from "./times";
-import { createSeed, SEED_AMENITIES } from "./seed";
-import type { Amenity, AppData, Booking, BookingExtra, Expense, Guest, Room, Villa } from "./types";
+import { fmtTime } from "./times";
+import type { Amenity, AppData, Booking, BookingExtra, Expense, Guest, Room, Villa, VillaSubscription } from "./types";
 import { extrasTotal, uid } from "./utils";
-
-const STORAGE_KEY = "villa-serenity:v1";
 
 export interface BookingDraft {
   mode?: "villa" | "room" | "any";
@@ -21,14 +18,35 @@ export interface BookingDraft {
 type NewBooking = Omit<Booking, "id" | "createdAt" | "status">;
 type SaveResult = { ok: true; booking: Booking } | Extract<Availability, { ok: false }>;
 
+/**
+ * Where the signed-in admin stands:
+ *  loading     still asking the server
+ *  signed_out  no session
+ *  ok          signed in, villa and user both active
+ *  disabled    the villa or the user has been switched off by the Super Admin
+ *  lapsed      the card subscription ended, so access is off until the villa pays again
+ *  error       the server or database could not be reached
+ */
+export type Access = "loading" | "signed_out" | "ok" | "disabled" | "lapsed" | "error";
+export type SignInResult = { ok: true } | { ok: false; code: string; message: string };
+
 interface Store extends AppData {
   ready: boolean;
   today: string;
+  /** This villa's subscription with the platform. Shown for information; only the Super Admin can change it. */
+  subscription: VillaSubscription | null;
 
+  access: Access;
   signedIn: boolean;
-  /** Returns false when the email or password is wrong. */
-  signIn: (email: string, password: string, remember: boolean) => boolean;
+  /** Who to contact when access is switched off */
+  support: SupportContact | null;
+  /** When the subscription ended: what paying again costs */
+  renewal: Renewal | null;
+  accessError: string | null;
+  signIn: (email: string, password: string, remember: boolean) => Promise<SignInResult>;
   signOut: () => void;
+  /** Ask the server again (after an error, or to pick up changes made elsewhere). */
+  reload: () => Promise<void>;
 
   addBooking: (input: NewBooking) => SaveResult;
   updateBooking: (id: string, patch: Partial<Booking>) => SaveResult;
@@ -52,7 +70,6 @@ interface Store extends AppData {
   updateAmenity: (id: string, patch: Partial<Amenity>) => void;
   removeAmenity: (id: string) => void;
   updateVilla: (patch: Partial<Villa>) => void;
-  resetDemo: () => void;
 
   // Panels that can be opened from anywhere
   openBookingId: string | null;
@@ -76,30 +93,35 @@ interface Store extends AppData {
 
 const StoreContext = createContext<Store | null>(null);
 
-function load(today: string): AppData {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as AppData;
-      if (parsed?.villa && Array.isArray(parsed.bookings)) {
-        // Older saves kept times as free text ("2:00 PM"); keep them as 24-hour "HH:MM".
-        parsed.villa.checkInTime = normalizeTime(parsed.villa.checkInTime, DEFAULT_CHECK_IN);
-        parsed.villa.checkOutTime = normalizeTime(parsed.villa.checkOutTime, DEFAULT_CHECK_OUT);
-        // Saves from before amenities existed get the starter list.
-        if (!Array.isArray(parsed.amenities)) parsed.amenities = SEED_AMENITIES.map((a) => ({ ...a }));
-        return parsed;
-      }
-    }
-  } catch {
-    // Private windows can block storage. The app still works, it just won't remember changes.
-  }
-  return createSeed(today);
-}
+/** Stands in until the villa's data has arrived. Nothing from it is shown. */
+const EMPTY: AppData = {
+  villa: { name: "", location: "", phone: "", maxGuests: 1, price: 0, ownerName: "", checkInTime: "14:00", checkOutTime: "11:00" },
+  rooms: [],
+  guests: [],
+  bookings: [],
+  expenses: [],
+  amenities: [],
+};
 
+type VillaAction = { type: string } & Record<string, unknown>;
+
+/**
+ * Holds the signed-in admin's villa data.
+ *
+ * The data comes from the server (/api/villa/data), which only ever returns the
+ * villa that belongs to the session. Changes show on screen at once and are
+ * sent to /api/villa/actions in order; the server checks every one again
+ * (access, booking rules, amounts). If the server refuses a change, the screen
+ * reloads the true data and says so.
+ */
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<AppData | null>(null);
+  const [subscription, setSubscription] = useState<VillaSubscription | null>(null);
   const [today, setToday] = useState("");
-  const [signedIn, setSignedIn] = useState(false);
+  const [access, setAccess] = useState<Access>("loading");
+  const [support, setSupport] = useState<SupportContact | null>(null);
+  const [renewal, setRenewal] = useState<Renewal | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const [checkoutIntent, setCheckoutIntent] = useState(false);
   const openBooking = useCallback((id: string | null) => {
@@ -117,29 +139,86 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Mock data lives in the browser, so it is loaded after the first render.
-  useEffect(() => {
-    const t = todayISO();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setToday(t);
-    setSignedIn(readSession());
-    setData(load(t));
-  }, []);
-
-  useEffect(() => {
-    if (!data) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {
-      // ignore
-    }
-  }, [data]);
-
   const notify = useCallback((message: string) => {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   }, []);
+
+  /** A refused request tells us where the admin now stands. Returns true when it was an access problem. */
+  const applyFailure = useCallback((failure: ApiFailure) => {
+    if (failure.status === 401) {
+      setAccess("signed_out");
+      setData(null);
+      return true;
+    }
+    if (failure.code === "access_disabled") {
+      setSupport(failure.support ?? null);
+      setAccess("disabled");
+      setData(null);
+      return true;
+    }
+    if (failure.code === "subscription_ended") {
+      setSupport(failure.support ?? null);
+      setRenewal(failure.renewal ?? null);
+      setAccess("lapsed");
+      setData(null);
+      return true;
+    }
+    return false;
+  }, []);
+
+  const reload = useCallback(async () => {
+    const result = await api<{ data: AppData; subscription?: VillaSubscription }>("/api/villa/data");
+    if (result.ok) {
+      setData(result.data);
+      setSubscription(result.subscription ?? null);
+      setAccessError(null);
+      setAccess("ok");
+    } else if (!applyFailure(result)) {
+      setAccessError(result.error);
+      setAccess((current) => (current === "ok" ? "ok" : "error"));
+    }
+  }, [applyFailure]);
+
+  // Changes are sent one after another, in the order they were made.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const pending = useRef(0);
+  const epoch = useRef(0);
+
+  const send = useCallback(
+    (action: VillaAction) => {
+      const startedIn = epoch.current;
+      pending.current += 1;
+      queue.current = queue.current.then(async () => {
+        try {
+          // After a refusal, later changes built on top of it are dropped; the screen has reloaded the truth.
+          if (startedIn !== epoch.current) return;
+          const result = await api("/api/villa/actions", action);
+          if (result.ok) return;
+          epoch.current += 1;
+          if (applyFailure(result)) return;
+          notify(result.status === 409 ? result.error : "That change could not be saved. Showing the latest saved data.");
+          await reload();
+        } finally {
+          pending.current -= 1;
+        }
+      });
+    },
+    [applyFailure, notify, reload],
+  );
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setToday(todayISO());
+    void reload();
+    // Coming back to the tab picks up anything changed elsewhere, including access being switched off.
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && pending.current === 0) void reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [reload]);
 
   const patch = useCallback((fn: (d: AppData) => AppData) => setData((d) => (d ? fn(d) : d)), []);
   const patchBooking = useCallback(
@@ -149,22 +228,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const store = useMemo<Store>(() => {
-    const d = data ?? createSeed(today || "2026-01-01");
+    const d = data ?? EMPTY;
     return {
       ...d,
-      ready: data !== null,
+      ready: access !== "loading",
       today,
+      subscription: access === "ok" ? subscription : null,
 
-      signedIn,
-      signIn(email, password, remember) {
-        if (!checkLogin(email, password)) return false;
-        writeSession(remember);
-        setSignedIn(true);
-        return true;
+      access,
+      signedIn: access === "ok" && data !== null,
+      support,
+      renewal,
+      accessError,
+      reload,
+      async signIn(email, password, remember) {
+        const result = await api("/api/auth/login", { portal: "villa", email, password, remember });
+        if (result.ok) {
+          await reload();
+          return { ok: true };
+        }
+        if (result.code === "access_disabled") {
+          setSupport(result.support ?? null);
+          setAccess("disabled");
+        }
+        return { ok: false, code: result.code, message: result.error };
       },
       signOut() {
-        clearSession();
-        setSignedIn(false);
+        void queue.current.then(() => api("/api/auth/logout", { portal: "villa" }));
+        setAccess("signed_out");
+        setData(null);
         openBooking(null);
         openGuest(null);
       },
@@ -174,6 +266,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!result.ok) return result;
         const booking: Booking = { ...input, id: uid("b"), status: "confirmed", createdAt: today };
         patch((s) => ({ ...s, bookings: [...s.bookings, booking] }));
+        send({ type: "addBooking", booking });
         return { ok: true, booking };
       },
 
@@ -185,46 +278,85 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const result = checkAvailability(next, d.bookings, d.rooms, id, d.villa);
         if (!result.ok) return result;
         patchBooking(id, () => next);
+        send({ type: "updateBooking", id, patch: next });
         return { ok: true, booking: next };
       },
 
-      checkIn: (id) => patchBooking(id, (b) => ({ ...b, status: "checked_in" })),
+      checkIn(id) {
+        patchBooking(id, (b) => ({ ...b, status: "checked_in" }));
+        send({ type: "checkIn", id });
+      },
       checkOut(id) {
         const b = d.bookings.find((x) => x.id === id);
         if (!b || b.total - b.paid > 0) return false;
         patchBooking(id, (x) => ({ ...x, status: "checked_out", checkedOutOn: today }));
+        send({ type: "checkOut", id });
         return true;
       },
-      setBookingExtras: (id, extras) =>
+      setBookingExtras(id, extras) {
         patchBooking(id, (b) => ({
           ...b,
           extras: extras.length > 0 ? extras : undefined,
           total: Math.max(b.total - extrasTotal(b.extras) + extrasTotal(extras), 0),
-        })),
-      cancelBooking: (id) => patchBooking(id, (b) => ({ ...b, status: "cancelled" })),
-      recordPayment: (id, amount) =>
-        patchBooking(id, (b) => ({ ...b, paid: Math.min(b.total, Math.max(0, b.paid + amount)) })),
+        }));
+        send({ type: "setBookingExtras", id, extras });
+      },
+      cancelBooking(id) {
+        patchBooking(id, (b) => ({ ...b, status: "cancelled" }));
+        send({ type: "cancelBooking", id });
+      },
+      recordPayment(id, amount) {
+        patchBooking(id, (b) => ({ ...b, paid: Math.min(b.total, Math.max(0, b.paid + amount)) }));
+        send({ type: "recordPayment", id, amount });
+      },
 
       addGuest(guest) {
         const created: Guest = { ...guest, id: uid("g") };
         patch((s) => ({ ...s, guests: [...s.guests, created] }));
+        send({ type: "addGuest", guest: created });
         return created;
       },
-      updateGuest: (id, change) =>
-        patch((s) => ({ ...s, guests: s.guests.map((g) => (g.id === id ? { ...g, ...change } : g)) })),
+      updateGuest(id, change) {
+        patch((s) => ({ ...s, guests: s.guests.map((g) => (g.id === id ? { ...g, ...change } : g)) }));
+        send({ type: "updateGuest", id, patch: change });
+      },
 
-      addExpense: (expense) => patch((s) => ({ ...s, expenses: [{ ...expense, id: uid("e") }, ...s.expenses] })),
-      deleteExpense: (id) => patch((s) => ({ ...s, expenses: s.expenses.filter((e) => e.id !== id) })),
+      addExpense(expense) {
+        const created = { ...expense, id: uid("e") };
+        patch((s) => ({ ...s, expenses: [created, ...s.expenses] }));
+        send({ type: "addExpense", expense: created });
+      },
+      deleteExpense(id) {
+        patch((s) => ({ ...s, expenses: s.expenses.filter((e) => e.id !== id) }));
+        send({ type: "deleteExpense", id });
+      },
 
-      addRoom: (room) => patch((s) => ({ ...s, rooms: [...s.rooms, { ...room, id: uid("r") }] })),
-      updateRoom: (id, change) =>
-        patch((s) => ({ ...s, rooms: s.rooms.map((r) => (r.id === id ? { ...r, ...change } : r)) })),
-      addAmenity: (amenity) => patch((s) => ({ ...s, amenities: [...s.amenities, { ...amenity, id: uid("a") }] })),
-      updateAmenity: (id, change) =>
-        patch((s) => ({ ...s, amenities: s.amenities.map((a) => (a.id === id ? { ...a, ...change } : a)) })),
-      removeAmenity: (id) => patch((s) => ({ ...s, amenities: s.amenities.filter((a) => a.id !== id) })),
-      updateVilla: (change) => patch((s) => ({ ...s, villa: { ...s.villa, ...change } })),
-      resetDemo: () => setData(createSeed(todayISO())),
+      addRoom(room) {
+        const created = { ...room, id: uid("r") };
+        patch((s) => ({ ...s, rooms: [...s.rooms, created] }));
+        send({ type: "addRoom", room: created });
+      },
+      updateRoom(id, change) {
+        patch((s) => ({ ...s, rooms: s.rooms.map((r) => (r.id === id ? { ...r, ...change } : r)) }));
+        send({ type: "updateRoom", id, patch: change });
+      },
+      addAmenity(amenity) {
+        const created = { ...amenity, id: uid("a") };
+        patch((s) => ({ ...s, amenities: [...s.amenities, created] }));
+        send({ type: "addAmenity", amenity: created });
+      },
+      updateAmenity(id, change) {
+        patch((s) => ({ ...s, amenities: s.amenities.map((a) => (a.id === id ? { ...a, ...change } : a)) }));
+        send({ type: "updateAmenity", id, patch: change });
+      },
+      removeAmenity(id) {
+        patch((s) => ({ ...s, amenities: s.amenities.filter((a) => a.id !== id) }));
+        send({ type: "removeAmenity", id });
+      },
+      updateVilla(change) {
+        patch((s) => ({ ...s, villa: { ...s.villa, ...change } }));
+        send({ type: "updateVilla", patch: change });
+      },
 
       openBookingId,
       openBooking,
@@ -241,7 +373,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toast,
       notify,
     };
-  }, [data, today, signedIn, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
+  }, [data, subscription, today, access, support, renewal, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }

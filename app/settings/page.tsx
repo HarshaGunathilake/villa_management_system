@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { RotateCcw } from "lucide-react";
 import { Card, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { TimeSelect } from "@/components/stay-times";
@@ -9,9 +8,8 @@ import { Field, Input, MoneyInput, Stepper } from "@/components/ui/field";
 import { useStore } from "@/lib/store";
 
 export default function SettingsPage() {
-  const { villa, updateVilla, resetDemo, notify } = useStore();
+  const { villa, updateVilla, notify } = useStore();
   const [draft, setDraft] = useState(villa);
-  const [confirmReset, setConfirmReset] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(villa);
   const set = (key: keyof typeof villa) => (e: React.ChangeEvent<HTMLInputElement>) => setDraft({ ...draft, [key]: e.target.value });
 
@@ -51,35 +49,6 @@ export default function SettingsPage() {
       >
         Save changes
       </Button>
-
-      <h2 className="mt-12 mb-3 text-xl font-semibold">Demo data</h2>
-      <Card className="p-5 sm:p-6">
-        <p className="text-muted">
-          This prototype keeps everything in this browser. Start again with the sample bookings, guests and expenses whenever you like.
-        </p>
-        {confirmReset ? (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="mr-auto font-medium">Replace everything with the sample data?</span>
-            <Button variant="secondary" onClick={() => setConfirmReset(false)}>
-              Keep my changes
-            </Button>
-            <Button
-              variant="danger"
-              onClick={() => {
-                resetDemo();
-                setConfirmReset(false);
-                notify("Sample data restored");
-              }}
-            >
-              Reset
-            </Button>
-          </div>
-        ) : (
-          <Button variant="secondary" className="mt-4" onClick={() => setConfirmReset(true)}>
-            <RotateCcw /> Reset sample data
-          </Button>
-        )}
-      </Card>
     </div>
   );
 }

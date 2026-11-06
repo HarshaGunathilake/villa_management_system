@@ -12,6 +12,7 @@ const NOTES: Record<string, string> = {
   "/rooms": "Names, prices and which rooms take bookings",
   "/amenities": "Extras guests can add, like a BBQ or meals",
   "/settings": "Villa name, phone, whole-villa price",
+  "/subscription": "Your plan, next payment and payment records",
 };
 
 export default function MorePage() {

@@ -1,5 +1,5 @@
-import { forwardRef, useId } from "react";
-import { Minus, Plus } from "lucide-react";
+import { forwardRef, useId, useState } from "react";
+import { Eye, EyeOff, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const inputBase =
@@ -38,6 +38,27 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
 ) {
   return <input ref={ref} className={cn(inputBase, className)} {...props} />;
 });
+
+/** A password field with an eye button to show or hide what was typed. Every password field in the app uses this. */
+export const PasswordInput = forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, "type">>(
+  function PasswordInput({ className, ...props }, ref) {
+    const [show, setShow] = useState(false);
+    return (
+      <div className="relative">
+        <input ref={ref} type={show ? "text" : "password"} className={cn(inputBase, "pr-14", className)} {...props} />
+        <button
+          type="button"
+          onClick={() => setShow(!show)}
+          aria-label={show ? "Hide password" : "Show password"}
+          aria-pressed={show}
+          className="absolute top-1/2 right-1.5 grid size-10 -translate-y-1/2 place-items-center rounded-full text-muted hover:bg-well hover:text-ink"
+        >
+          {show ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
+        </button>
+      </div>
+    );
+  },
+);
 
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function Textarea({ className, ...props }, ref) {

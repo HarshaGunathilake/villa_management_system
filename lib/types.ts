@@ -116,3 +116,33 @@ export interface AppData {
   expenses: Expense[];
   amenities: Amenity[];
 }
+
+/** How the villa pays for its subscription: card payments through Dodo Payments. */
+export interface VillaBilling {
+  /** Card payments are set up on this server (Dodo keys present) */
+  enabled: boolean;
+  /**
+   * none       no card subscription yet, or it ended: show "Pay by card"
+   * active     paying automatically every month
+   * attention  the last charge failed: the card needs updating
+   * pending    a checkout was started but not finished
+   */
+  state: "none" | "active" | "attention" | "pending";
+  /** Dodo's own word for the subscription, e.g. "active", "on_hold" */
+  dodoStatus: string | null;
+  /** There is a Dodo customer, so the billing portal (card, invoices, cancel) can be opened */
+  canManage: boolean;
+}
+
+/** A villa's own subscription, as shown to its admin. Amounts and status are set by the platform and by Dodo. */
+export interface VillaSubscription {
+  plan: string;
+  monthlyAmount: number;
+  status: "active" | "payment_due" | "overdue";
+  startDate: string;
+  nextPaymentDate: string;
+  payments: { id: string; amount: number; paymentDate: string; periodStart: string; periodEnd: string; note: string }[];
+  billing: VillaBilling;
+  /** Who to contact about payments */
+  support: { email: string; phone: string };
+}
