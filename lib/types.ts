@@ -27,6 +27,12 @@ export interface Villa {
   /** Usual check-in and check-out times, 24-hour "HH:MM" */
   checkInTime: string;
   checkOutTime: string;
+  /** Email last month's report to the owner on the 1st of every month */
+  monthlyReport: boolean;
+  /** Another address that gets the monthly report too, e.g. an accountant. Empty for none. */
+  reportCc: string;
+  /** The signed-in owner's email, where reports go. Read-only. */
+  ownerEmail: string;
 }
 
 export interface Room {
@@ -108,6 +114,61 @@ export interface Expense {
   receiptName?: string;
 }
 
+export const PAY_TYPES = ["monthly", "daily"] as const;
+export type PayType = (typeof PAY_TYPES)[number];
+
+/** Someone who works at the villa: a caretaker, cook, cleaner or gardener. */
+export interface Staff {
+  id: string;
+  name: string;
+  /** What they do, e.g. "Caretaker" */
+  role: string;
+  phone: string;
+  /** Paid a monthly salary, or a daily wage for the days they worked */
+  payType: PayType;
+  /** The monthly salary, or the wage for one day, in LKR */
+  rate: number;
+  /** Registered for EPF and ETF */
+  epf: boolean;
+  epfNumber?: string;
+  /** Still working at the villa. Past staff keep their payslips. */
+  active: boolean;
+}
+
+/** One line on a payslip, such as overtime or a salary advance. */
+export interface PayLine {
+  name: string;
+  amount: number;
+}
+
+/**
+ * A month's pay for one person. Their name, role and rate are copied so a later
+ * change to the staff member doesn't rewrite payslips already given.
+ */
+export interface Payslip {
+  id: string;
+  /** Shown as PS-0001 */
+  number: number;
+  staffId: string;
+  staffName: string;
+  staffRole: string;
+  payType: PayType;
+  rate: number;
+  /** YYYY-MM */
+  month: string;
+  /** Days worked, for daily pay */
+  days?: number;
+  additions: PayLine[];
+  deductions: PayLine[];
+  epf: boolean;
+  epfNumber?: string;
+  note?: string;
+  createdOn: string;
+  /** Set once the pay was handed over; the payslip is then also an expense */
+  paidOn?: string;
+  expenseId?: string;
+}
+
 export interface AppData {
   villa: Villa;
   rooms: Room[];
@@ -115,6 +176,8 @@ export interface AppData {
   bookings: Booking[];
   expenses: Expense[];
   amenities: Amenity[];
+  staff: Staff[];
+  payslips: Payslip[];
 }
 
 /** How the villa pays for its subscription: card payments through Dodo Payments. */

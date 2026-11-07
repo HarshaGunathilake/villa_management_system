@@ -144,24 +144,31 @@ async function log(kind: EmailKind, to: string, subject: string, status: "sent" 
 }
 
 /** Sends one email and logs it. Returns whether it was sent; never throws. */
-export async function sendEmail(input: { kind: EmailKind; to: string; villaId?: string | null; replyTo?: string; build: (platform: string) => { subject: string; text: string; html: string } }): Promise<{ ok: boolean; error?: string }> {
+export interface MailAttachment {
+  filename: string;
+  content: string;
+  contentType: string;
+}
+
+export async function sendEmail(input: { kind: EmailKind; to: string; cc?: string; villaId?: string | null; replyTo?: string; attachments?: MailAttachment[]; build: (platform: string) => { subject: string; text: string; html: string } }): Promise<{ ok: boolean; error?: string }> {
   let subject: string = input.kind;
+  const who = [input.to, input.cc].filter(Boolean).join(", ").slice(0, 190);
   try {
     subject = input.build("LankaStay").subject;
     const t = await transport();
     if (!t) {
-      await log(input.kind, input.to, subject, "skipped", "Email is not set up (Super Admin → Settings → Email).", input.villaId ?? null);
+      await log(input.kind, who, subject, "skipped", "Email is not set up (Super Admin → Settings → Email).", input.villaId ?? null);
       return { ok: false, error: "Email is not set up yet. Add the SMTP settings first." };
     }
     const mail = input.build(t.platform);
     subject = mail.subject;
-    await t.mailer.sendMail({ from: t.from, to: input.to, replyTo: input.replyTo, subject: mail.subject, text: mail.text, html: mail.html });
-    await log(input.kind, input.to, subject, "sent", null, input.villaId ?? null);
+    await t.mailer.sendMail({ from: t.from, to: input.to, cc: input.cc || undefined, replyTo: input.replyTo, subject: mail.subject, text: mail.text, html: mail.html, attachments: input.attachments });
+    await log(input.kind, who, subject, "sent", null, input.villaId ?? null);
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[mail]", input.kind, message);
-    await log(input.kind, input.to, subject, "failed", message, input.villaId ?? null);
+    await log(input.kind, who, subject, "failed", message, input.villaId ?? null);
     return { ok: false, error: message };
   }
 }
@@ -176,7 +183,7 @@ export async function recentEmails(limit = 100): Promise<EmailLogEntry[]> {
 
 /* --------------------------------------------------------------- templates */
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 /** A plain, branded email that reads well in every mail app. */
 export function layout(platform: string, o: { heading: string; paragraphs: string[]; button?: { label: string; url: string }; footnote?: string }) {

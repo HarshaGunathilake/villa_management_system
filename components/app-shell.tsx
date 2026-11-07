@@ -12,6 +12,7 @@ import {
   ConciergeBell,
   CreditCard,
   Home,
+  IdCard,
   LogOut,
   Menu,
   Plus,
@@ -40,6 +41,7 @@ const NAV = [
 
 const MORE = [
   { href: "/expenses", label: "Expenses", icon: Receipt },
+  { href: "/staff", label: "Staff", icon: IdCard },
   { href: "/money", label: "Money", icon: Wallet },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/rooms", label: "Rooms", icon: BedDouble },
@@ -119,7 +121,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   }
 
   // Invoices and confirmations are shown on their own, ready to print.
-  if (pathname.startsWith("/document")) {
+  if (pathname.startsWith("/document") || pathname.startsWith("/payslip")) {
     return (
       <>
         {children}

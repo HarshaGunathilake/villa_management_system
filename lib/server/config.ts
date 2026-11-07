@@ -25,6 +25,8 @@ export const config = {
   appUrl: (process.env.APP_URL ?? "").replace(/\/+$/, ""),
   /** Encrypts secrets kept in the database (the SMTP password). Any long random string; keep it the same once set. */
   appSecret: process.env.APP_SECRET ?? "",
+  /** Protects the scheduled jobs (/api/cron/...). Vercel sends it as "Authorization: Bearer <CRON_SECRET>". */
+  cronSecret: process.env.CRON_SECRET ?? "",
   /** Card payments for villa subscriptions. Leave DODO_PAYMENTS_API_KEY empty and card payments stay switched off. */
   dodo: {
     apiKey: process.env.DODO_PAYMENTS_API_KEY ?? "",

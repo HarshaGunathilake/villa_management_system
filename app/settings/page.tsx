@@ -2,24 +2,26 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BedDouble, ChevronRight, ConciergeBell, CreditCard, Home, KeyRound, Moon } from "lucide-react";
+import { BedDouble, ChevronRight, ConciergeBell, CreditCard, Home, KeyRound, Mail, Moon, Send, UserRound } from "lucide-react";
 import { Card, PageHeader } from "@/components/app-shell";
 import { TimeSelect } from "@/components/stay-times";
 import { Button } from "@/components/ui/button";
-import { Field, Input, MoneyInput, PasswordInput, Stepper } from "@/components/ui/field";
+import { Field, Input, MoneyInput, PasswordInput, Stepper, Toggle } from "@/components/ui/field";
+import { addMonths, fmtMonthLong, monthKey } from "@/lib/dates";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /*
- * Villa settings, in three short tabs so nothing needs a long scroll:
- * the villa's details, how stays work, and the owner's password.
+ * Villa settings, in short tabs so nothing needs a long scroll: the villa's
+ * details, how stays work, the monthly report email, and the owner's password.
  */
 
-type Tab = "villa" | "stays" | "password";
+type Tab = "villa" | "stays" | "report" | "password";
 const TABS: { id: Tab; label: string; short: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "villa", label: "Villa details", short: "Details", icon: Home },
   { id: "stays", label: "Stays and price", short: "Stays", icon: Moon },
+  { id: "report", label: "Monthly report", short: "Report", icon: Mail },
   { id: "password", label: "Password", short: "Password", icon: KeyRound },
 ];
 
@@ -28,18 +30,19 @@ export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>("villa");
   const [draft, setDraft] = useState(villa);
   const dirty = JSON.stringify(draft) !== JSON.stringify(villa);
-  const valid = draft.name.trim().length > 0 && draft.price > 0;
+  const ccValid = !draft.reportCc.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.reportCc.trim());
+  const valid = draft.name.trim().length > 0 && draft.price > 0 && ccValid;
   const set = (key: keyof typeof villa) => (e: React.ChangeEvent<HTMLInputElement>) => setDraft({ ...draft, [key]: e.target.value });
 
   // Open the tab named in the address (?tab=password), so other screens can link straight to it.
   useEffect(() => {
     const wanted = new URLSearchParams(window.location.search).get("tab");
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (wanted === "villa" || wanted === "stays" || wanted === "password") setTab(wanted);
+    if (TABS.some((t) => t.id === wanted)) setTab(wanted as Tab);
   }, []);
 
   const save = () => {
-    updateVilla(draft);
+    updateVilla({ ...draft, reportCc: draft.reportCc.trim().toLowerCase() });
     notify("Settings saved");
   };
 
@@ -47,7 +50,7 @@ export default function SettingsPage() {
     <div className="max-w-3xl">
       <PageHeader title="Villa settings" subtitle="Your villa's details, how stays work, and your sign-in." />
 
-      <div role="tablist" aria-label="Settings sections" className="mb-5 grid grid-cols-3 gap-1.5 sm:flex">
+      <div role="tablist" aria-label="Settings sections" className="mb-5 grid grid-cols-4 gap-1.5 sm:flex">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -58,11 +61,11 @@ export default function SettingsPage() {
             aria-controls={`panel-${t.id}`}
             onClick={() => setTab(t.id)}
             className={cn(
-              "flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-full border px-3 font-medium whitespace-nowrap sm:px-4",
+              "flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-full border px-2 text-[0.9375rem] font-medium whitespace-nowrap sm:px-4 sm:text-base",
               tab === t.id ? "border-ink bg-ink text-white" : "border-line-strong bg-card text-ink hover:bg-well",
             )}
           >
-            <t.icon className="size-[1.125rem] shrink-0" aria-hidden />
+            <t.icon className="hidden size-[1.125rem] shrink-0 sm:block" aria-hidden />
             <span className="sm:hidden">{t.short}</span>
             <span className="hidden sm:inline">{t.label}</span>
           </button>
@@ -103,6 +106,36 @@ export default function SettingsPage() {
         </section>
       ) : null}
 
+      {tab === "report" ? (
+        <section role="tabpanel" id="panel-report" aria-labelledby="tab-report">
+          <Card className="p-5 sm:p-6">
+            <div className="flex items-start gap-4">
+              <div className="min-w-0 flex-1">
+                <h2 className="font-semibold">Email me a report every month</h2>
+                <p className="mt-1 text-[0.9375rem] text-muted">
+                  On the 1st of each month, get last month&apos;s income, expenses, profit and occupancy by email, with every booking, expense and payslip attached as a spreadsheet.
+                </p>
+              </div>
+              <Toggle checked={draft.monthlyReport} onChange={(v) => setDraft({ ...draft, monthlyReport: v })} label="Email me a report every month" />
+            </div>
+            <div className="mt-5 space-y-4 border-t border-line pt-5">
+              <div className="flex items-center gap-3 text-[0.9375rem]">
+                <UserRound className="size-5 shrink-0 text-muted" aria-hidden />
+                <span className="min-w-0">
+                  Sent to <span className="font-medium break-all">{villa.ownerEmail || "your sign-in email"}</span>
+                </span>
+              </div>
+              <Field label="Also send to" optional hint={ccValid ? "Your accountant or a partner, for example." : "Enter a full email address, or leave this empty."}>
+                {(id) => (
+                  <Input id={id} type="email" inputMode="email" autoComplete="off" value={draft.reportCc} onChange={set("reportCc")} placeholder="accountant@example.com" aria-invalid={!ccValid} />
+                )}
+              </Field>
+            </div>
+          </Card>
+          <SendReportNow />
+        </section>
+      ) : null}
+
       {tab === "password" ? (
         <section role="tabpanel" id="panel-password" aria-labelledby="tab-password">
           <ChangePassword />
@@ -124,6 +157,53 @@ export default function SettingsPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Email any past month's report straight away, whether the monthly email is on or not. */
+function SendReportNow() {
+  const { today, villa } = useStore();
+  const thisMonth = monthKey(today || new Date().toISOString().slice(0, 10));
+  const months = Array.from({ length: 12 }, (_, i) => addMonths(thisMonth, -i));
+  const [month, setMonth] = useState(addMonths(thisMonth, -1));
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const send = async () => {
+    setBusy(true);
+    setResult(null);
+    const r = await api<{ to: string[] }>("/api/villa/report-email", { month });
+    setBusy(false);
+    setResult(r.ok ? { ok: true, text: `Sent the ${fmtMonthLong(month)} report to ${r.to.join(" and ")}.` } : { ok: false, text: r.error });
+  };
+
+  return (
+    <Card className="mt-5 p-5 sm:p-6">
+      <h2 className="font-semibold">Send a report now</h2>
+      <p className="mt-1 text-[0.9375rem] text-muted">Email the report for any month, for example to see what it looks like.</p>
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <Field label="Month" className="min-w-0 flex-[1_1_12rem]">
+          {(id) => (
+            <select id={id} value={month} onChange={(e) => setMonth(e.target.value)} className="min-h-12 w-full rounded-xl border border-line-strong bg-card px-4 text-base focus:border-brass-deep focus:ring-2 focus:ring-brass/25 focus:outline-none">
+              {months.map((m) => (
+                <option key={m} value={m}>
+                  {fmtMonthLong(m)}
+                  {m === thisMonth ? " (so far)" : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <Button variant="secondary" onClick={send} disabled={busy || !villa.ownerEmail}>
+          <Send /> {busy ? "Sending" : "Email this report"}
+        </Button>
+      </div>
+      {result ? (
+        <p role="status" className={cn("mt-4 rounded-xl px-4 py-3 text-[0.9375rem]", result.ok ? "bg-sage-soft text-sage-deep" : "bg-clay-soft text-clay")}>
+          {result.text}
+        </p>
+      ) : null}
+    </Card>
   );
 }
 

@@ -8,6 +8,7 @@ import { useStore } from "@/lib/store";
 
 const NOTES: Record<string, string> = {
   "/expenses": "Bills, cleaning, repairs",
+  "/staff": "Your staff and their monthly payslips",
   "/money": "Revenue, expenses and profit this month",
   "/reports": "Income, expenses and profit over time, charts and CSV",
   "/rooms": "Names, prices and which rooms take bookings",

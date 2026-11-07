@@ -36,6 +36,7 @@ export const EMAIL_KIND_LABEL: Record<EmailKind, string> = {
   payment_received: "Payment received",
   payment_failed: "Payment failed",
   subscription_ended: "Subscription ended",
+  monthly_report: "Monthly report",
 };
 
 type Loaded = { mail: MailSettings; log: EmailLogEntry[]; canStoreSecrets: boolean; appUrlSet: boolean };

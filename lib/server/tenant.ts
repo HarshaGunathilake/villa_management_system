@@ -10,9 +10,14 @@ import {
   type BookingExtra,
   type Expense,
   type Guest,
+  type PayLine,
+  type Payslip,
   type Room,
+  type Staff,
   type VillaSubscription,
+  PAY_TYPES,
 } from "../types";
+import { payslipExpense } from "../payroll";
 import { extrasTotal } from "../utils";
 import { loadBilling } from "./billing";
 import { nowSql, serverToday } from "./config";
@@ -97,11 +102,13 @@ interface VillaRow {
   price: number;
   check_in_time: string;
   check_out_time: string;
+  monthly_report: number;
+  report_cc: string | null;
 }
 
 async function loadVillaRow(q: Db, villaId: string, lock = false) {
   const row = await q.one<VillaRow>(
-    `SELECT name, location, phone, max_guests, price, check_in_time, check_out_time FROM villas WHERE id = ?${lock ? " FOR UPDATE" : ""}`,
+    `SELECT name, location, phone, max_guests, price, check_in_time, check_out_time, monthly_report, report_cc FROM villas WHERE id = ?${lock ? " FOR UPDATE" : ""}`,
     [villaId],
   );
   if (!row) throw notFound("Villa");
@@ -109,9 +116,35 @@ async function loadVillaRow(q: Db, villaId: string, lock = false) {
 }
 
 /** The whole of one villa's data, in the shape the app's screens already use. */
-export async function loadVillaData(villaId: string, userName: string): Promise<AppData> {
+interface StaffRow { id: string; name: string; role: string; phone: string; pay_type: Staff["payType"]; rate: number; epf: number; epf_number: string | null; active: number }
+interface PayslipRow {
+  id: string; number: number; staff_id: string; staff_name: string; staff_role: string; pay_type: Staff["payType"]; rate: number; month: string; days: number | null;
+  additions: string | null; deductions: string | null; epf: number; epf_number: string | null; note: string | null; created_on: string; paid_on: string | null; expense_id: string | null;
+}
+const lines = (raw: string | null): PayLine[] => {
+  try {
+    return raw ? (JSON.parse(raw) as PayLine[]) : [];
+  } catch {
+    return [];
+  }
+};
+const toStaff = (r: StaffRow): Staff => ({ id: r.id, name: r.name, role: r.role, phone: r.phone, payType: r.pay_type, rate: r.rate, epf: !!r.epf, epfNumber: r.epf_number ?? undefined, active: !!r.active });
+const toPayslip = (r: PayslipRow): Payslip => ({
+  id: r.id, number: r.number, staffId: r.staff_id, staffName: r.staff_name, staffRole: r.staff_role, payType: r.pay_type, rate: r.rate, month: r.month,
+  days: r.days ?? undefined, additions: lines(r.additions), deductions: lines(r.deductions), epf: !!r.epf, epfNumber: r.epf_number ?? undefined,
+  note: r.note ?? undefined, createdOn: r.created_on, paidOn: r.paid_on ?? undefined, expenseId: r.expense_id ?? undefined,
+});
+
+export async function loadStaff(q: Db, villaId: string) {
+  return (await q.query<StaffRow>("SELECT * FROM staff WHERE villa_id = ? ORDER BY position", [villaId])).map(toStaff);
+}
+export async function loadPayslips(q: Db, villaId: string) {
+  return (await q.query<PayslipRow>("SELECT * FROM payslips WHERE villa_id = ? ORDER BY number DESC", [villaId])).map(toPayslip);
+}
+
+export async function loadVillaData(villaId: string, userName: string, userEmail = ""): Promise<AppData> {
   const villa = await loadVillaRow(db, villaId);
-  const [rooms, guests, bookings, expenses, amenities] = await Promise.all([
+  const [rooms, guests, bookings, expenses, amenities, staff, payslips] = await Promise.all([
     loadRooms(db, villaId),
     db.query<{ id: string; name: string; phone: string; email: string | null; country: string | null }>(
       "SELECT id, name, phone, email, country FROM guests WHERE villa_id = ? ORDER BY position",
@@ -126,6 +159,8 @@ export async function loadVillaData(villaId: string, userName: string): Promise<
       "SELECT id, name, price, unit, enabled FROM amenities WHERE villa_id = ? ORDER BY position",
       [villaId],
     ),
+    loadStaff(db, villaId),
+    loadPayslips(db, villaId),
   ]);
 
   return {
@@ -138,12 +173,17 @@ export async function loadVillaData(villaId: string, userName: string): Promise<
       ownerName: userName,
       checkInTime: normalizeTime(villa.check_in_time, DEFAULT_CHECK_IN),
       checkOutTime: normalizeTime(villa.check_out_time, DEFAULT_CHECK_OUT),
+      monthlyReport: !!villa.monthly_report,
+      reportCc: villa.report_cc ?? "",
+      ownerEmail: userEmail,
     },
     rooms,
     guests: guests.map((g) => ({ id: g.id, name: g.name, phone: g.phone, email: g.email ?? undefined, country: g.country ?? undefined })),
     bookings,
     expenses: expenses.map((e) => ({ id: e.id, name: e.name, category: e.category, amount: e.amount, date: e.date, note: e.note ?? undefined, receiptName: e.receipt_name ?? undefined })),
     amenities: amenities.map((a) => ({ id: a.id, name: a.name, price: a.price, unit: a.unit, enabled: !!a.enabled })),
+    staff,
+    payslips,
   };
 }
 
@@ -263,6 +303,37 @@ function cleanGuest(input: Body) {
     email: (optional(input.email) && text(input.email, "Email", { max: 190 })) || undefined,
     country: (optional(input.country) && text(input.country, "Country", { max: 80 })) || undefined,
   };
+}
+
+function cleanStaff(input: Body) {
+  return {
+    name: text(input.name, "Name", { min: 2, max: 120 }),
+    role: text(input.role, "Job", { max: 80, optional: true }),
+    phone: text(input.phone, "Phone", { max: 40, optional: true }),
+    payType: oneOf(input.payType, PAY_TYPES, "Pay type"),
+    rate: integer(input.rate, "Pay", { min: 1, max: 10_000_000 }),
+    epf: input.epf === true,
+    epfNumber: text(input.epfNumber, "EPF number", { max: 40, optional: true }) || undefined,
+    active: input.active !== false,
+  };
+}
+
+function cleanLines(value: unknown, label: string): PayLine[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 12) throw badRequest(`${label} are not valid.`);
+  return value.map((raw) => {
+    const l = obj(raw, label);
+    return { name: text(l.name, `${label} name`, { min: 1, max: 80 }), amount: integer(l.amount, `${label} amount`, { min: 1, max: 10_000_000 }) };
+  });
+}
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** Records that a payslip was paid and adds it to the villa's expenses, in one go. */
+async function payPayslip(q: Db, villaId: string, p: Payslip, paidOn: string, expenseId: string) {
+  const e = payslipExpense(p);
+  await insertExpense(q, villaId, { id: expenseId, name: e.name.slice(0, 160), category: "Staff", amount: Math.max(e.amount, 1), date: paidOn, note: e.note.slice(0, 500) });
+  await q.run("UPDATE payslips SET paid_on = ?, expense_id = ? WHERE villa_id = ? AND id = ?", [paidOn, expenseId, villaId, p.id]);
 }
 
 function cleanPhoto(value: unknown) {
@@ -478,6 +549,92 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
       return;
     }
 
+    /* ---- staff and payslips */
+    case "addStaff": {
+      const input = obj(body.staff, "Staff");
+      const s = cleanStaff(input);
+      await db.run("INSERT INTO staff (villa_id, id, name, role, phone, pay_type, rate, epf, epf_number, active) VALUES (?,?,?,?,?,?,?,?,?,?)", [
+        villaId, recordId(input.id, "Staff id"), s.name, s.role, s.phone, s.payType, s.rate, s.epf ? 1 : 0, s.epfNumber ?? null, s.active ? 1 : 0,
+      ]);
+      return;
+    }
+    case "updateStaff": {
+      const id = recordId(body.id, "Staff");
+      const current = (await loadStaff(db, villaId)).find((s) => s.id === id);
+      if (!current) throw notFound("Staff member");
+      const s = cleanStaff({ ...current, ...obj(body.patch, "Changes") });
+      await db.run("UPDATE staff SET name=?, role=?, phone=?, pay_type=?, rate=?, epf=?, epf_number=?, active=? WHERE villa_id = ? AND id = ?", [
+        s.name, s.role, s.phone, s.payType, s.rate, s.epf ? 1 : 0, s.epfNumber ?? null, s.active ? 1 : 0, villaId, id,
+      ]);
+      return;
+    }
+    case "removeStaff": {
+      const id = recordId(body.id, "Staff");
+      if (await db.one("SELECT 1 FROM payslips WHERE villa_id = ? AND staff_id = ? LIMIT 1", [villaId, id])) {
+        throw new ApiError(409, "conflict", "This person has payslips, so they can't be removed. Mark them as no longer working here instead.");
+      }
+      await mustAffect(db.run("DELETE FROM staff WHERE villa_id = ? AND id = ?", [villaId, id]), "Staff member");
+      return;
+    }
+    case "addPayslip": {
+      const input = obj(body.payslip, "Payslip");
+      await transaction(async (tx) => {
+        await loadVillaRow(tx, villaId, true); // one payslip number at a time per villa
+        const staffId = recordId(input.staffId, "Staff");
+        const person = (await loadStaff(tx, villaId)).find((s) => s.id === staffId);
+        if (!person) throw notFound("Staff member");
+        const month = text(input.month, "Month", { min: 7, max: 7 });
+        if (!MONTH.test(month)) throw badRequest("Month is not valid.");
+        const payType = oneOf(input.payType ?? person.payType, PAY_TYPES, "Pay type");
+        const days = payType === "daily" ? integer(input.days, "Days worked", { min: 1, max: 31 }) : undefined;
+        const n = Number((await tx.one<{ n: number | null }>("SELECT MAX(number) AS n FROM payslips WHERE villa_id = ?", [villaId]))?.n ?? 0) + 1;
+        const p: Payslip = {
+          id: recordId(input.id, "Payslip id"),
+          number: n,
+          staffId,
+          staffName: person.name,
+          staffRole: person.role,
+          payType,
+          rate: integer(input.rate ?? person.rate, "Pay", { min: 1, max: 10_000_000 }),
+          month,
+          days,
+          additions: cleanLines(input.additions, "Additions"),
+          deductions: cleanLines(input.deductions, "Deductions"),
+          epf: input.epf === undefined ? person.epf : input.epf === true,
+          epfNumber: person.epfNumber,
+          note: text(input.note, "Note", { max: 500, optional: true }) || undefined,
+          createdOn: serverToday(),
+        };
+        await tx.run(
+          `INSERT INTO payslips (villa_id, id, number, staff_id, staff_name, staff_role, pay_type, rate, month, days, additions, deductions, epf, epf_number, note, created_on)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [villaId, p.id, p.number, p.staffId, p.staffName, p.staffRole, p.payType, p.rate, p.month, p.days ?? null, JSON.stringify(p.additions), JSON.stringify(p.deductions), p.epf ? 1 : 0, p.epfNumber ?? null, p.note ?? null, p.createdOn],
+        );
+        if (body.paidOn) await payPayslip(tx, villaId, p, isoDate(body.paidOn, "Paid on"), recordId(body.expenseId, "Expense id"));
+      });
+      return;
+    }
+    case "payPayslip": {
+      const id = recordId(body.id, "Payslip");
+      await transaction(async (tx) => {
+        const row = await tx.one<PayslipRow>("SELECT * FROM payslips WHERE villa_id = ? AND id = ? FOR UPDATE", [villaId, id]);
+        if (!row) throw notFound("Payslip");
+        if (row.paid_on) throw new ApiError(409, "conflict", "This payslip is already marked as paid.");
+        await payPayslip(tx, villaId, toPayslip(row), isoDate(body.paidOn, "Paid on"), recordId(body.expenseId, "Expense id"));
+      });
+      return;
+    }
+    case "deletePayslip": {
+      const id = recordId(body.id, "Payslip");
+      await transaction(async (tx) => {
+        const row = await tx.one<PayslipRow>("SELECT * FROM payslips WHERE villa_id = ? AND id = ? FOR UPDATE", [villaId, id]);
+        if (!row) throw notFound("Payslip");
+        if (row.expense_id) await tx.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, row.expense_id]);
+        await tx.run("DELETE FROM payslips WHERE villa_id = ? AND id = ?", [villaId, id]);
+      });
+      return;
+    }
+
     /* ---- the villa's own settings (never its subscription or access) */
     case "updateVilla": {
       const patch = obj(body.patch, "Changes");
@@ -494,6 +651,11 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
         nowSql(),
         villaId,
       ]);
+      if (patch.monthlyReport !== undefined || patch.reportCc !== undefined) {
+        const cc = text(pick(patch.reportCc, current.report_cc ?? ""), "Also send to", { max: 190, optional: true }).toLowerCase();
+        if (cc && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cc)) throw badRequest("Enter a valid email address for the report, or leave it empty.");
+        await db.run("UPDATE villas SET monthly_report = ?, report_cc = ? WHERE id = ?", [pick(patch.monthlyReport, !!current.monthly_report) === true ? 1 : 0, cc || null, villaId]);
+      }
       if (typeof patch.ownerName === "string" && patch.ownerName.trim().length >= 2) {
         await db.run("UPDATE users SET name = ?, updated_at = ? WHERE id = ? AND villa_id = ?", [text(patch.ownerName, "Your name", { max: 120 }), nowSql(), ctx.userId, villaId]);
       }

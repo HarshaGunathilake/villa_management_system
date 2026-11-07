@@ -117,7 +117,7 @@ export interface MailSettings {
   emails: { welcome: boolean; paymentReceived: boolean; paymentFailed: boolean; subscriptionEnded: boolean };
 }
 
-export type EmailKind = "test" | "contact" | "password_reset" | "verify_email" | "welcome" | "payment_received" | "payment_failed" | "subscription_ended";
+export type EmailKind = "test" | "contact" | "password_reset" | "verify_email" | "welcome" | "payment_received" | "payment_failed" | "subscription_ended" | "monthly_report";
 
 export interface EmailLogEntry {
   id: number;

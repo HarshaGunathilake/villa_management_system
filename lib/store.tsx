@@ -5,7 +5,8 @@ import { api, type ApiFailure, type Renewal, type SupportContact } from "./api";
 import { checkAvailability, type Availability } from "./availability";
 import { todayISO } from "./dates";
 import { fmtTime } from "./times";
-import type { Amenity, AppData, Booking, BookingExtra, Expense, Guest, Room, Villa, VillaSubscription } from "./types";
+import { payslipExpense } from "./payroll";
+import type { Amenity, AppData, Booking, BookingExtra, Expense, Guest, Payslip, Room, Staff, Villa, VillaSubscription } from "./types";
 import { extrasTotal, uid } from "./utils";
 
 export interface BookingDraft {
@@ -16,6 +17,7 @@ export interface BookingDraft {
 }
 
 type NewBooking = Omit<Booking, "id" | "createdAt" | "status">;
+export type NewPayslip = Pick<Payslip, "staffId" | "payType" | "rate" | "month" | "days" | "additions" | "deductions" | "epf" | "note">;
 type SaveResult = { ok: true; booking: Booking } | Extract<Availability, { ok: false }>;
 
 /** Shown when a change is tried while the subscription payment is due. The server refuses these too. */
@@ -86,6 +88,15 @@ interface Store extends AppData {
   removeAmenity: (id: string) => void;
   updateVilla: (patch: Partial<Villa>) => void;
 
+  addStaff: (staff: Omit<Staff, "id">) => Staff | null;
+  updateStaff: (id: string, patch: Partial<Staff>) => void;
+  removeStaff: (id: string) => void;
+  /** Makes a payslip; with `paidOn` it is also marked paid and added to Expenses. */
+  addPayslip: (input: NewPayslip, paidOn?: string) => Payslip | null;
+  payPayslip: (id: string, paidOn: string) => void;
+  /** Removes the payslip and, if it was paid, its expense. */
+  deletePayslip: (id: string) => void;
+
   // Panels that can be opened from anywhere
   openBookingId: string | null;
   openBooking: (id: string | null) => void;
@@ -110,12 +121,14 @@ const StoreContext = createContext<Store | null>(null);
 
 /** Stands in until the villa's data has arrived. Nothing from it is shown. */
 const EMPTY: AppData = {
-  villa: { name: "", location: "", phone: "", maxGuests: 1, price: 0, ownerName: "", checkInTime: "14:00", checkOutTime: "11:00" },
+  villa: { name: "", location: "", phone: "", maxGuests: 1, price: 0, ownerName: "", checkInTime: "14:00", checkOutTime: "11:00", monthlyReport: false, reportCc: "", ownerEmail: "" },
   rooms: [],
   guests: [],
   bookings: [],
   expenses: [],
   amenities: [],
+  staff: [],
+  payslips: [],
 };
 
 type VillaAction = { type: string } & Record<string, unknown>;
@@ -417,6 +430,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (paused()) return;
         patch((s) => ({ ...s, villa: { ...s.villa, ...change } }));
         send({ type: "updateVilla", patch: change });
+      },
+
+      addStaff(input) {
+        if (paused()) return null;
+        const created: Staff = { ...input, id: uid("s") };
+        patch((s) => ({ ...s, staff: [...s.staff, created] }));
+        send({ type: "addStaff", staff: created });
+        return created;
+      },
+      updateStaff(id, change) {
+        if (paused()) return;
+        patch((s) => ({ ...s, staff: s.staff.map((x) => (x.id === id ? { ...x, ...change } : x)) }));
+        send({ type: "updateStaff", id, patch: change });
+      },
+      removeStaff(id) {
+        if (paused()) return;
+        patch((s) => ({ ...s, staff: s.staff.filter((x) => x.id !== id) }));
+        send({ type: "removeStaff", id });
+      },
+      addPayslip(input, paidOn) {
+        if (paused()) return null;
+        const person = d.staff.find((x) => x.id === input.staffId);
+        if (!person) return null;
+        const number = d.payslips.reduce((n, p) => Math.max(n, p.number), 0) + 1;
+        const expenseId = paidOn ? uid("e") : undefined;
+        const slip: Payslip = { ...input, id: uid("p"), number, staffName: person.name, staffRole: person.role, epfNumber: person.epfNumber, createdOn: today, paidOn, expenseId };
+        patch((s) => ({
+          ...s,
+          payslips: [slip, ...s.payslips],
+          expenses: paidOn && expenseId ? [{ id: expenseId, category: "Staff", date: paidOn, ...payslipExpense(slip) }, ...s.expenses] : s.expenses,
+        }));
+        send({ type: "addPayslip", payslip: slip, paidOn, expenseId });
+        return slip;
+      },
+      payPayslip(id, paidOn) {
+        if (paused()) return;
+        const slip = d.payslips.find((p) => p.id === id);
+        if (!slip || slip.paidOn) return;
+        const expenseId = uid("e");
+        const paid = { ...slip, paidOn, expenseId };
+        patch((s) => ({
+          ...s,
+          payslips: s.payslips.map((p) => (p.id === id ? paid : p)),
+          expenses: [{ id: expenseId, category: "Staff", date: paidOn, ...payslipExpense(paid) }, ...s.expenses],
+        }));
+        send({ type: "payPayslip", id, paidOn, expenseId });
+      },
+      deletePayslip(id) {
+        if (paused()) return;
+        const slip = d.payslips.find((p) => p.id === id);
+        patch((s) => ({ ...s, payslips: s.payslips.filter((p) => p.id !== id), expenses: s.expenses.filter((e) => !slip?.expenseId || e.id !== slip.expenseId) }));
+        send({ type: "deletePayslip", id });
       },
 
       openBookingId,

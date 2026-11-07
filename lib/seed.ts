@@ -121,11 +121,16 @@ export function createSeed(today: string): AppData {
       ownerName: "Harsha",
       checkInTime: "14:00",
       checkOutTime: "11:00",
+      monthlyReport: false,
+      reportCc: "",
+      ownerEmail: "",
     },
     rooms,
     guests,
     bookings,
     expenses,
     amenities: SEED_AMENITIES.map((a) => ({ ...a })),
+    staff: [],
+    payslips: [],
   };
 }

@@ -201,6 +201,55 @@ TABLES.push(
     email VARCHAR(190) NOT NULL PRIMARY KEY,
     created_at DATETIME NOT NULL
   )`,
+  // People who work at a villa, and the payslips made for them.
+  `CREATE TABLE IF NOT EXISTS staff (
+    villa_id VARCHAR(40) NOT NULL,
+    id VARCHAR(40) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    role VARCHAR(80) NOT NULL DEFAULT '',
+    phone VARCHAR(40) NOT NULL DEFAULT '',
+    pay_type ENUM('monthly','daily') NOT NULL,
+    rate INT NOT NULL DEFAULT 0,
+    epf TINYINT(1) NOT NULL DEFAULT 0,
+    epf_number VARCHAR(40) NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    position BIGINT NOT NULL AUTO_INCREMENT,
+    PRIMARY KEY (villa_id, id),
+    KEY staff_position (position),
+    CONSTRAINT staff_villa_fk FOREIGN KEY (villa_id) REFERENCES villas (id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS payslips (
+    villa_id VARCHAR(40) NOT NULL,
+    id VARCHAR(40) NOT NULL,
+    number INT NOT NULL,
+    staff_id VARCHAR(40) NOT NULL,
+    staff_name VARCHAR(120) NOT NULL,
+    staff_role VARCHAR(80) NOT NULL DEFAULT '',
+    pay_type ENUM('monthly','daily') NOT NULL,
+    rate INT NOT NULL,
+    month CHAR(7) NOT NULL,
+    days INT NULL,
+    additions TEXT NULL,
+    deductions TEXT NULL,
+    epf TINYINT(1) NOT NULL DEFAULT 0,
+    epf_number VARCHAR(40) NULL,
+    note VARCHAR(500) NULL,
+    created_on DATE NOT NULL,
+    paid_on DATE NULL,
+    expense_id VARCHAR(40) NULL,
+    PRIMARY KEY (villa_id, id),
+    UNIQUE KEY payslips_number (villa_id, number),
+    KEY payslips_month (villa_id, month),
+    CONSTRAINT payslips_villa_fk FOREIGN KEY (villa_id) REFERENCES villas (id) ON DELETE CASCADE
+  )`,
+  // Which monthly reports have gone out, so a month is never emailed twice.
+  `CREATE TABLE IF NOT EXISTS monthly_reports_sent (
+    villa_id VARCHAR(40) NOT NULL,
+    month CHAR(7) NOT NULL,
+    sent_at DATETIME NOT NULL,
+    PRIMARY KEY (villa_id, month),
+    CONSTRAINT monthly_reports_villa_fk FOREIGN KEY (villa_id) REFERENCES villas (id) ON DELETE CASCADE
+  )`,
   // Every email the platform tried to send, for the Super Admin to check.
   `CREATE TABLE IF NOT EXISTS email_log (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -229,6 +278,9 @@ const ADDED_COLUMNS: [table: string, column: string, ddl: string][] = [
   ["users", "tour_pending", "TINYINT(1) NOT NULL DEFAULT 0"],
   // The name the product was given in Dodo (shown on the checkout page), so it can follow the platform name.
   ["dodo_products", "name", "VARCHAR(120) NULL"],
+  // The owner's choice to get last month's report by email on the 1st, and an extra address for it.
+  ["villas", "monthly_report", "TINYINT(1) NOT NULL DEFAULT 0"],
+  ["villas", "report_cc", "VARCHAR(190) NULL"],
 ];
 
 const ADDED_INDEXES: [table: string, name: string, ddl: string][] = [
@@ -251,7 +303,7 @@ async function upgrade(db: Db) {
   await db.run("UPDATE platform_settings SET value = 'LankaStay' WHERE name = 'platformName' AND value = 'Villa Stay Manager'");
 }
 
-export const TABLE_NAMES = ["waitlist", "email_log", "email_verifications", "password_resets", "dodo_webhook_events", "dodo_products", "amenities", "expenses", "bookings", "guests", "rooms", "platform_settings", "activity_log", "subscription_payments", "sessions", "users", "villas"];
+export const TABLE_NAMES = ["monthly_reports_sent", "payslips", "staff", "waitlist", "email_log", "email_verifications", "password_resets", "dodo_webhook_events", "dodo_products", "amenities", "expenses", "bookings", "guests", "rooms", "platform_settings", "activity_log", "subscription_payments", "sessions", "users", "villas"];
 
 export async function createSchema(db: Db) {
   for (const ddl of TABLES) await db.run(ddl);
