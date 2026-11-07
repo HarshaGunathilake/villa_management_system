@@ -47,7 +47,7 @@ function Verify() {
       <AuthPanel back={back}>
         <CircleCheck className="size-10 text-sage" aria-hidden />
         <h1 className="mt-4 text-2xl font-semibold">Email confirmed</h1>
-        <p className="mt-2 text-muted">Thank you. Your account is open. Carry on to start your subscription.</p>
+        <p className="mt-2 text-muted">Thank you. Your account is ready. Carry on to your dashboard.</p>
         <Link href="/dashboard" className="mt-6 flex min-h-12 items-center justify-center rounded-xl bg-ink px-5 font-semibold text-white">
           Continue
         </Link>

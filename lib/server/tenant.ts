@@ -2,12 +2,15 @@ import { checkAvailability } from "../availability";
 import { DEFAULT_CHECK_IN, DEFAULT_CHECK_OUT, normalizeTime } from "../times";
 import {
   AMENITY_UNITS,
+  BILL_REPEATS,
   EXPENSE_CATEGORIES,
   SOURCES,
   type Amenity,
   type AppData,
   type Booking,
   type BookingExtra,
+  type Bill,
+  type BillPayment,
   type Expense,
   type Guest,
   type PayLine,
@@ -17,6 +20,7 @@ import {
   type VillaSubscription,
   PAY_TYPES,
 } from "../types";
+import { billExpense, isBillPeriod } from "../bills";
 import { payslipExpense } from "../payroll";
 import { extrasTotal } from "../utils";
 import { loadBilling } from "./billing";
@@ -138,13 +142,27 @@ const toPayslip = (r: PayslipRow): Payslip => ({
 export async function loadStaff(q: Db, villaId: string) {
   return (await q.query<StaffRow>("SELECT * FROM staff WHERE villa_id = ? ORDER BY position", [villaId])).map(toStaff);
 }
+interface BillRow { id: string; name: string; category: Bill["category"]; amount: number; repeat_every: Bill["repeat"]; due_day: number; start_month: string; active: number; note: string | null }
+interface BillPaymentRow { bill_id: string; period: string; paid_on: string; amount: number; expense_id: string | null; skipped: number }
+const toBill = (r: BillRow): Bill => ({
+  id: r.id, name: r.name, category: r.category, amount: r.amount, repeat: r.repeat_every, dueDay: r.due_day, startMonth: r.start_month, active: !!r.active, note: r.note ?? undefined,
+});
+const toBillPayment = (r: BillPaymentRow): BillPayment => ({
+  billId: r.bill_id, period: r.period, paidOn: r.paid_on, amount: r.amount, expenseId: r.expense_id ?? undefined, skipped: !!r.skipped,
+});
+export async function loadBills(q: Db, villaId: string) {
+  return (await q.query<BillRow>("SELECT * FROM bills WHERE villa_id = ? ORDER BY position", [villaId])).map(toBill);
+}
+export async function loadBillPayments(q: Db, villaId: string) {
+  return (await q.query<BillPaymentRow>("SELECT * FROM bill_payments WHERE villa_id = ? ORDER BY paid_on DESC, period DESC", [villaId])).map(toBillPayment);
+}
 export async function loadPayslips(q: Db, villaId: string) {
   return (await q.query<PayslipRow>("SELECT * FROM payslips WHERE villa_id = ? ORDER BY number DESC", [villaId])).map(toPayslip);
 }
 
 export async function loadVillaData(villaId: string, userName: string, userEmail = ""): Promise<AppData> {
   const villa = await loadVillaRow(db, villaId);
-  const [rooms, guests, bookings, expenses, amenities, staff, payslips] = await Promise.all([
+  const [rooms, guests, bookings, expenses, amenities, staff, payslips, bills, billPayments] = await Promise.all([
     loadRooms(db, villaId),
     db.query<{ id: string; name: string; phone: string; email: string | null; country: string | null }>(
       "SELECT id, name, phone, email, country FROM guests WHERE villa_id = ? ORDER BY position",
@@ -161,6 +179,8 @@ export async function loadVillaData(villaId: string, userName: string, userEmail
     ),
     loadStaff(db, villaId),
     loadPayslips(db, villaId),
+    loadBills(db, villaId),
+    loadBillPayments(db, villaId),
   ]);
 
   return {
@@ -184,6 +204,8 @@ export async function loadVillaData(villaId: string, userName: string, userEmail
     amenities: amenities.map((a) => ({ id: a.id, name: a.name, price: a.price, unit: a.unit, enabled: !!a.enabled })),
     staff,
     payslips,
+    bills,
+    billPayments,
   };
 }
 
@@ -315,6 +337,21 @@ function cleanStaff(input: Body) {
     epf: input.epf === true,
     epfNumber: text(input.epfNumber, "EPF number", { max: 40, optional: true }) || undefined,
     active: input.active !== false,
+  };
+}
+
+function cleanBill(input: Body): Omit<Bill, "id"> {
+  const startMonth = text(input.startMonth, "First due month", { min: 7, max: 7 });
+  if (!MONTH.test(startMonth)) throw badRequest("First due month is not valid.");
+  return {
+    name: text(input.name, "Bill name", { min: 2, max: 120 }),
+    category: oneOf(input.category, EXPENSE_CATEGORIES, "Category"),
+    amount: integer(input.amount, "Amount", { min: 0, max: 100_000_000 }),
+    repeat: oneOf(input.repeat, BILL_REPEATS, "Repeats"),
+    dueDay: integer(input.dueDay, "Due day", { min: 1, max: 31 }),
+    startMonth,
+    active: input.active !== false,
+    note: text(input.note, "Note", { max: 500, optional: true }) || undefined,
   };
 }
 
@@ -475,7 +512,12 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
       return;
     }
     case "deleteExpense": {
-      await mustAffect(db.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, recordId(body.id, "Expense")]), "Expense");
+      const id = recordId(body.id, "Expense");
+      await transaction(async (tx) => {
+        await mustAffect(tx.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, id]), "Expense");
+        // A paid bill whose expense is deleted goes back to unpaid.
+        await tx.run("DELETE FROM bill_payments WHERE villa_id = ? AND expense_id = ?", [villaId, id]);
+      });
       return;
     }
 
@@ -631,6 +673,67 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
         if (!row) throw notFound("Payslip");
         if (row.expense_id) await tx.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, row.expense_id]);
         await tx.run("DELETE FROM payslips WHERE villa_id = ? AND id = ?", [villaId, id]);
+      });
+      return;
+    }
+
+    /* ---- bills that come round again */
+    case "addBill": {
+      const b = cleanBill(obj(body.bill, "Bill"));
+      await db.run("INSERT INTO bills (villa_id, id, name, category, amount, repeat_every, due_day, start_month, active, note) VALUES (?,?,?,?,?,?,?,?,?,?)", [
+        villaId, recordId(obj(body.bill, "Bill").id, "Bill id"), b.name, b.category, b.amount, b.repeat, b.dueDay, b.startMonth, b.active ? 1 : 0, b.note ?? null,
+      ]);
+      return;
+    }
+    case "updateBill": {
+      const id = recordId(body.id, "Bill");
+      const current = (await loadBills(db, villaId)).find((b) => b.id === id);
+      if (!current) throw notFound("Bill");
+      const b = cleanBill({ ...current, ...obj(body.patch, "Changes") });
+      await db.run("UPDATE bills SET name=?, category=?, amount=?, repeat_every=?, due_day=?, start_month=?, active=?, note=? WHERE villa_id = ? AND id = ?", [
+        b.name, b.category, b.amount, b.repeat, b.dueDay, b.startMonth, b.active ? 1 : 0, b.note ?? null, villaId, id,
+      ]);
+      return;
+    }
+    case "deleteBill": {
+      // Its payment records go with it; the expenses it became stay in Expenses.
+      await mustAffect(db.run("DELETE FROM bills WHERE villa_id = ? AND id = ?", [villaId, recordId(body.id, "Bill")]), "Bill");
+      return;
+    }
+    case "payBill":
+    case "skipBill": {
+      const billId = recordId(body.billId, "Bill");
+      const period = text(body.period, "Month", { min: 7, max: 7 });
+      if (!MONTH.test(period)) throw badRequest("Month is not valid.");
+      const paidOn = isoDate(body.paidOn ?? serverToday(), "Paid on");
+      await transaction(async (tx) => {
+        const row = await tx.one<BillRow>("SELECT * FROM bills WHERE villa_id = ? AND id = ? FOR UPDATE", [villaId, billId]);
+        if (!row) throw notFound("Bill");
+        const bill = toBill(row);
+        if (!isBillPeriod(bill, period)) throw badRequest(`${bill.name} is not due in that month.`);
+        if (await tx.one("SELECT 1 AS x FROM bill_payments WHERE villa_id = ? AND bill_id = ? AND period = ?", [villaId, billId, period])) {
+          throw new ApiError(409, "conflict", "This bill is already marked as paid for that month.");
+        }
+        if (body.type === "skipBill") {
+          await tx.run("INSERT INTO bill_payments (villa_id, bill_id, period, paid_on, amount, expense_id, skipped) VALUES (?,?,?,?,0,NULL,1)", [villaId, billId, period, paidOn]);
+          return;
+        }
+        const amount = integer(body.amount, "Amount", { min: 1, max: 100_000_000 });
+        const expenseId = recordId(body.expenseId, "Expense id");
+        const e = billExpense(bill, period);
+        await insertExpense(tx, villaId, { id: expenseId, name: e.name.slice(0, 160), category: e.category, amount, date: paidOn, note: e.note });
+        await tx.run("INSERT INTO bill_payments (villa_id, bill_id, period, paid_on, amount, expense_id, skipped) VALUES (?,?,?,?,?,?,0)", [villaId, billId, period, paidOn, amount, expenseId]);
+      });
+      return;
+    }
+    case "undoBillPayment": {
+      const billId = recordId(body.billId, "Bill");
+      const period = text(body.period, "Month", { min: 7, max: 7 });
+      await transaction(async (tx) => {
+        const row = await tx.one<BillPaymentRow>("SELECT * FROM bill_payments WHERE villa_id = ? AND bill_id = ? AND period = ? FOR UPDATE", [villaId, billId, period]);
+        if (!row) throw notFound("Bill payment");
+        if (row.expense_id) await tx.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, row.expense_id]);
+        await tx.run("DELETE FROM bill_payments WHERE villa_id = ? AND bill_id = ? AND period = ?", [villaId, billId, period]);
       });
       return;
     }

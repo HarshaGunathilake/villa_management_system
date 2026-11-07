@@ -1,6 +1,6 @@
 import { nowSql } from "@/lib/server/config";
 import { db } from "@/lib/server/db";
-import { ApiError, email, readJson, route } from "@/lib/server/http";
+import { ApiError, email, readJson, route, websitePreflight } from "@/lib/server/http";
 import { websiteFlags } from "@/lib/server/site";
 
 /** Public: "Tell me when it opens" on the Coming soon page. Asking twice is fine. */
@@ -21,4 +21,7 @@ export const POST = route(async (request) => {
   recent.set(ip, times);
   await db.run("INSERT IGNORE INTO waitlist (email, created_at) VALUES (?, ?)", [address, nowSql()]);
   return { ok: true };
-});
+}, { fromWebsite: true });
+
+/** The website (its own domain) asks before posting. */
+export const OPTIONS = websitePreflight;

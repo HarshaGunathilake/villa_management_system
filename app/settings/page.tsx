@@ -26,7 +26,7 @@ const TABS: { id: Tab; label: string; short: string; icon: React.ComponentType<{
 ];
 
 export default function SettingsPage() {
-  const { villa, updateVilla, notify, readOnly } = useStore();
+  const { villa, updateVilla, notify, readOnly, awaitingPayment } = useStore();
   const [tab, setTab] = useState<Tab>("villa");
   const [draft, setDraft] = useState(villa);
   const dirty = JSON.stringify(draft) !== JSON.stringify(villa);
@@ -146,11 +146,12 @@ export default function SettingsPage() {
       {dirty && tab !== "password" ? (
         <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-20 mt-5 lg:bottom-4">
           <div className="flex flex-wrap items-center gap-3 rounded-card border border-line bg-card/95 px-4 py-3 shadow-float backdrop-blur sm:px-5">
-            <span className="min-w-0 flex-1 font-medium">{readOnly ? "Changes are paused until the payment is made." : valid ? "Unsaved changes" : draft.price <= 0 ? "Enter a price per night" : "Enter the villa name"}</span>
+            <span className="min-w-0 flex-1 font-medium">{awaitingPayment ? "Subscribe to save your changes." : readOnly ? "Changes are paused until the payment is made." : valid ? "Unsaved changes" : draft.price <= 0 ? "Enter a price per night" : "Enter the villa name"}</span>
             <Button variant="ghost" onClick={() => setDraft(villa)}>
               Discard
             </Button>
-            <Button disabled={readOnly || !valid} onClick={save}>
+            {/* Before the first payment, Save stays tappable and opens the subscribe popup. */}
+            <Button disabled={(readOnly && !awaitingPayment) || !valid} onClick={save}>
               Save changes
             </Button>
           </div>
@@ -162,7 +163,7 @@ export default function SettingsPage() {
 
 /** Email any past month's report straight away, whether the monthly email is on or not. */
 function SendReportNow() {
-  const { today, villa } = useStore();
+  const { today, villa, awaitingPayment, setSubscribeOpen } = useStore();
   const thisMonth = monthKey(today || new Date().toISOString().slice(0, 10));
   const months = Array.from({ length: 12 }, (_, i) => addMonths(thisMonth, -i));
   const [month, setMonth] = useState(addMonths(thisMonth, -1));
@@ -170,6 +171,7 @@ function SendReportNow() {
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const send = async () => {
+    if (awaitingPayment) return setSubscribeOpen(true);
     setBusy(true);
     setResult(null);
     const r = await api<{ to: string[] }>("/api/villa/report-email", { month });

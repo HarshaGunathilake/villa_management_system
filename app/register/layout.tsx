@@ -1,22 +1,25 @@
-import type { Metadata } from "next";
-import { ComingSoon } from "@/components/site/coming-soon";
-import { pageMeta } from "@/lib/server/seo";
-import { loadSite } from "@/lib/server/site";
+import Link from "next/link";
+import { AuthPanel } from "@/components/auth-panel";
+import { signupsHeldBack } from "@/lib/server/site";
+import { SITE_URL } from "@/lib/site-url";
 
-export async function generateMetadata(): Promise<Metadata> {
-  const site = await loadSite();
-  return pageMeta({
-    siteName: site.name,
-    index: site.indexable,
-    title: `Register your villa | ${site.name}`,
-    description: `Create a ${site.name} account for your villa in two minutes. Confirm your email, pay the first month by card, and start taking bookings.`,
-    path: "/register",
-  });
-}
+// Checked on every visit: it follows Super Admin → Settings → Website.
+export const dynamic = "force-dynamic";
 
 export default async function RegisterLayout({ children }: { children: React.ReactNode }) {
-  // Sign-ups wait for launch while the site is "coming soon".
-  const site = await loadSite();
-  if (site.comingSoon && !site.adminPreview) return <ComingSoon site={site} />;
+  // Sign-ups wait for launch while the website is "coming soon" (a signed-in Super Admin can still try them).
+  if (await signupsHeldBack()) {
+    return (
+      <AuthPanel back={{ href: "/login", label: "Sign in" }}>
+        <h1 className="text-2xl font-semibold">Sign-ups open soon</h1>
+        <p className="mt-2 text-muted">We are getting ready to launch. Leave your email on our website and we will tell you the day it opens.</p>
+        {SITE_URL ? (
+          <Link href={SITE_URL} className="mt-6 flex min-h-12 items-center justify-center rounded-xl bg-ink px-5 font-semibold text-white">
+            Go to the website
+          </Link>
+        ) : null}
+      </AuthPanel>
+    );
+  }
   return children;
 }

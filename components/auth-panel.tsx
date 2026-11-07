@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { SITE_URL } from "@/lib/site-url";
 import { BrandMark, Wordmark } from "@/components/brand";
 import { api } from "@/lib/api";
 
@@ -15,7 +16,7 @@ export function AuthPanel({ children, back }: { children: React.ReactNode; back:
   }, []);
   return (
     <div className="flex min-h-dvh flex-col items-center bg-sand px-4 py-10 sm:py-16">
-      <Link href="/" className="flex items-center gap-2.5" aria-label={`${platform} home`}>
+      <Link href={SITE_URL || "/login"} className="flex items-center gap-2.5" aria-label={`${platform} home`}>
         <BrandMark className="size-9" />
         <Wordmark name={platform} className="text-2xl" />
       </Link>

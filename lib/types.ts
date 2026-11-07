@@ -178,6 +178,41 @@ export interface AppData {
   amenities: Amenity[];
   staff: Staff[];
   payslips: Payslip[];
+  bills: Bill[];
+  billPayments: BillPayment[];
+}
+
+export const BILL_REPEATS = ["monthly", "quarterly", "yearly"] as const;
+export type BillRepeat = (typeof BILL_REPEATS)[number];
+
+/** A bill that comes round again: electricity, water, internet, insurance and so on. */
+export interface Bill {
+  id: string;
+  name: string;
+  /** The expense category it is filed under when paid */
+  category: ExpenseCategory;
+  /** The usual amount, used when it is marked paid (can be changed then) */
+  amount: number;
+  repeat: BillRepeat;
+  /** Day of the month it is due, 1 to 31. Shorter months use their last day. */
+  dueDay: number;
+  /** YYYY-MM of the first time it is due; later ones follow every 1, 3 or 12 months */
+  startMonth: string;
+  /** Off once the villa no longer pays it. Its past payments are kept. */
+  active: boolean;
+  note?: string;
+}
+
+/** One time a bill was dealt with: paid (and added to Expenses) or skipped. */
+export interface BillPayment {
+  billId: string;
+  /** YYYY-MM of the due date this payment is for */
+  period: string;
+  paidOn: string;
+  amount: number;
+  /** The expense it became; none when skipped */
+  expenseId?: string;
+  skipped: boolean;
 }
 
 /** How the villa pays for its subscription: card payments through Dodo Payments. */

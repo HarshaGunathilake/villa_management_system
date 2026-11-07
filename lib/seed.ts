@@ -132,5 +132,7 @@ export function createSeed(today: string): AppData {
     amenities: SEED_AMENITIES.map((a) => ({ ...a })),
     staff: [],
     payslips: [],
+    bills: [],
+    billPayments: [],
   };
 }

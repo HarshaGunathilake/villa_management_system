@@ -150,8 +150,14 @@ const lapsed = (v: VillaAccessRow) => v.account_status === "disabled" && (v.disa
  * Every villa request passes through here. The villa is taken from the
  * signed-in user's own record, never from anything the browser sends, and both
  * the user and the villa must be active.
+ *
+ * A self sign-up that has not made its first payment ("unpaid") may look at its
+ * villa (allowUnpaid: the data route) but change nothing: every other route
+ * answers payment_due until the first payment goes through.
  */
-export async function requireVillaAdmin(opts: { allowLapsed?: boolean; allowUnverified?: boolean } = {}): Promise<{ user: SessionUser; villaId: string }> {
+export async function requireVillaAdmin(
+  opts: { allowLapsed?: boolean; allowUnverified?: boolean; allowUnpaid?: boolean } = {},
+): Promise<{ user: SessionUser; villaId: string; unpaid: boolean }> {
   const user = await currentUser("villa");
   if (!user || user.role !== "villa_admin" || !user.villaId) throw new ApiError(401, "unauthenticated", "Please sign in.");
   if (user.status !== "active") throw await accessDisabled();
@@ -162,12 +168,14 @@ export async function requireVillaAdmin(opts: { allowLapsed?: boolean; allowUnve
   const villa = await db.one<VillaAccessRow>("SELECT account_status, disabled_reason FROM villas WHERE id = ?", [user.villaId]);
   if (!villa) throw await accessDisabled();
   if (lapsed(villa)) {
+    const unpaid = villa.disabled_reason === "unpaid";
     // Only the payment routes accept a villa whose subscription ended.
-    if (opts.allowLapsed) return { user, villaId: user.villaId };
+    if (opts.allowLapsed || (unpaid && opts.allowUnpaid)) return { user, villaId: user.villaId, unpaid };
+    if (unpaid) throw new ApiError(403, "payment_due", "Subscribe to start using your villa. You can look around until then.");
     throw await subscriptionEnded(user.villaId);
   }
   if (villa.account_status !== "active") throw await accessDisabled();
-  return { user, villaId: user.villaId };
+  return { user, villaId: user.villaId, unpaid: false };
 }
 
 /**

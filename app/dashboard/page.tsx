@@ -1,14 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { CreditCard, LogIn, LogOut, Plus, Receipt, UserPlus } from "lucide-react";
+import { CalendarClock, ChevronRight, CreditCard, LogIn, LogOut, Plus, Receipt, UserPlus } from "lucide-react";
 import { Card, SectionTitle, useStartBooking } from "@/components/app-shell";
+import { DueRow, PayBillSheet } from "@/components/bill-sheets";
 import { BookingRow } from "@/components/booking-bits";
 import { Photo } from "@/components/photo";
 import { SubscriptionCard } from "@/components/subscription-card";
 import { Button } from "@/components/ui/button";
 import { VillaStrip } from "@/components/villa-strip";
 import { bookingPhase, coversNight, guestCount, isActive, roomNight } from "@/lib/availability";
+import { billsDueSoon, billsToPay, dueSoonText, type BillDue } from "@/lib/bills";
 import { fmtDay, fmtLong, fmtMonthLong, monthKey, nightsBetween } from "@/lib/dates";
 import { monthSummary } from "@/lib/finance";
 import { PHOTOS } from "@/lib/photos";
@@ -37,6 +40,9 @@ function greeting() {
 export default function HomePage() {
   const store = useStore();
   const { today, villa, bookings, rooms, expenses, subscription } = store;
+  const [paying, setPaying] = useState<BillDue | null>(null);
+  const bills = billsToPay(store.bills, store.billPayments, today);
+  const soon = billsDueSoon(store.bills, store.billPayments, today);
 
   const active = bookings.filter(isActive);
   const arrivals = active.filter((b) => b.checkIn === today);
@@ -63,6 +69,16 @@ export default function HomePage() {
         <Photo src={PHOTOS.villa} alt={`${villa.name} seen from the pool`} className="absolute inset-0" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/5" />
         <div className="relative flex min-h-52 flex-col justify-end p-5 text-white sm:min-h-60 sm:p-8">
+          {soon.length ? (
+            <Link
+              href="/bills"
+              className={`mb-auto inline-flex max-w-full min-h-11 items-center gap-2 self-start rounded-full px-4 font-medium shadow-card ${soon.some((d) => d.status === "overdue") ? "bg-clay-soft text-clay" : "bg-amber-soft text-amber-deep"} hover:brightness-95`}
+            >
+              <CalendarClock className="size-5 shrink-0" aria-hidden />
+              <span className="truncate">{dueSoonText(soon)}</span>
+              <ChevronRight className="-mr-1 size-4 shrink-0" aria-hidden />
+            </Link>
+          ) : null}
           <h1 className="text-[1.875rem] leading-tight font-semibold sm:text-[2.5rem]">
             {greeting()}, {villa.ownerName.split(" ")[0]}
           </h1>
@@ -115,6 +131,26 @@ export default function HomePage() {
           </div>
         ))}
       </section>
+
+      {bills.length ? (
+        <section className="mb-8">
+          <SectionTitle
+            action={
+              <Link href="/bills" className="font-medium text-brass-deep underline-offset-4 hover:underline">
+                All bills
+              </Link>
+            }
+          >
+            Bills to pay
+          </SectionTitle>
+          <Card className="divide-y divide-line overflow-hidden">
+            {bills.map((d) => (
+              <DueRow key={`${d.bill.id}-${d.period}`} due={d} onPay={() => setPaying(d)} />
+            ))}
+          </Card>
+          <PayBillSheet due={paying} onClose={() => setPaying(null)} />
+        </section>
+      ) : null}
 
       <section className="mb-8">
         <SectionTitle>Villa availability today</SectionTitle>

@@ -259,6 +259,21 @@ export default function NewBookingPage() {
     step === "dates" && mode === "villa" ? "When is the villa needed?" : step === "dates" && mode === "room" ? "Which room, and when?" : STEP_TITLES[step];
 
   // Payment due: no new bookings until it is paid (the server refuses them too).
+  if (store.readOnly && store.awaitingPayment) {
+    return (
+      <div className="mx-auto max-w-xl py-10 text-center">
+        <span className="mx-auto grid size-16 place-items-center rounded-full bg-brass-soft text-brass-deep">
+          <Lock className="size-7" />
+        </span>
+        <h1 className="mt-5 text-[1.875rem] leading-tight font-semibold">Subscribe to take bookings</h1>
+        <p className="mt-2 text-lg text-muted">Bookings, guests and everything else start working as soon as you subscribe.</p>
+        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+          <Button onClick={() => store.setSubscribeOpen(true)}>Subscribe, {money(store.awaitingPayment.monthlyAmount)} a month</Button>
+          <Button variant="secondary" onClick={() => router.push("/dashboard")}>Back to Home</Button>
+        </div>
+      </div>
+    );
+  }
   if (store.readOnly) {
     return (
       <div className="mx-auto max-w-xl py-10 text-center">

@@ -11,14 +11,16 @@ import { api } from "@/lib/api";
 import { PHOTOS } from "@/lib/photos";
 import { useStore } from "@/lib/store";
 import { money } from "@/lib/utils";
+import { SITE_URL } from "@/lib/site-url";
 
 /*
  * Anyone can create a villa account here. The account opens locked: the next
  * screen asks for the first card payment, and the villa opens once it goes through.
  */
 
-const TERMS_URL = process.env.NEXT_PUBLIC_TERMS_URL;
-const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_URL;
+// The Terms and Privacy pages live on the public website (NEXT_PUBLIC_SITE_URL), unless set separately.
+const TERMS_URL = process.env.NEXT_PUBLIC_TERMS_URL || (SITE_URL ? `${SITE_URL}/terms` : undefined);
+const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_URL || (SITE_URL ? `${SITE_URL}/privacy` : undefined);
 
 interface Info {
   platformName: string;
@@ -72,7 +74,7 @@ export default function RegisterPage() {
       setBusy(false);
       return setError(result.error);
     }
-    // Signed in: the app shell now shows "Confirm your email", then the first-payment screen.
+    // Signed in: the app shell now shows "Confirm your email", then the dashboard with the subscribe popup.
     await reload();
   };
 

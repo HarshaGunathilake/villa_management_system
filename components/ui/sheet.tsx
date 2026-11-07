@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import Link from "next/link";
 import { Lock, X } from "lucide-react";
-import { useReadOnly } from "@/lib/store";
+import { useReadOnly, useSubscribePrompt } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 interface SheetProps {
@@ -14,14 +15,24 @@ interface SheetProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
+  /** Opens even before the first payment: panels that show something (a booking, a guest) rather than add or change it. */
+  viewing?: boolean;
 }
 
 /** Slides up from the bottom on phones, in from the right on larger screens. */
-export function Sheet({ open, onOpenChange, title, description, children, footer, className }: SheetProps) {
+export function Sheet({ open, onOpenChange, title, description, children, footer, className, viewing = false }: SheetProps) {
   // Payment due: the panel can be read, but nothing in it can be saved.
   const readOnly = useReadOnly();
+  // Not subscribed yet: an add or edit panel doesn't open at all; the subscribe popup does instead.
+  const subscribe = useSubscribePrompt();
+  const blocked = open && !viewing && !!subscribe;
+  useEffect(() => {
+    if (!blocked) return;
+    onOpenChange(false);
+    subscribe?.();
+  }, [blocked, onOpenChange, subscribe]);
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open && !blocked} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="anim-fade fixed inset-0 z-40 bg-ink/35" />
         <Dialog.Content
@@ -63,6 +74,21 @@ export function Sheet({ open, onOpenChange, title, description, children, footer
 }
 
 function PausedNotice({ onNavigate }: { onNavigate: () => void }) {
+  const subscribe = useSubscribePrompt();
+  if (subscribe) {
+    return (
+      <div role="status" className="mb-5 flex gap-3 rounded-xl bg-brass-soft px-4 py-3.5 text-brass-deep">
+        <Lock className="mt-0.5 size-5 shrink-0" />
+        <div className="text-[0.9375rem]">
+          <p className="font-semibold">Subscribe to start</p>
+          <p>You can look around, but nothing here can be saved until you subscribe.</p>
+          <button type="button" onClick={() => { onNavigate(); subscribe(); }} className="mt-1 inline-block min-h-11 font-medium underline underline-offset-4">
+            Subscribe now
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div role="status" className="mb-5 flex gap-3 rounded-xl bg-amber-soft px-4 py-3.5 text-amber-deep">
       <Lock className="mt-0.5 size-5 shrink-0" />

@@ -88,7 +88,7 @@ export function GuestSheet() {
   const { openGuestId, openGuest, guests } = useStore();
   const guest = guests.find((g) => g.id === openGuestId);
   return (
-    <Sheet open={!!guest} onOpenChange={(open) => !open && openGuest(null)} title="Guest">
+    <Sheet viewing open={!!guest} onOpenChange={(open) => !open && openGuest(null)} title="Guest">
       {guest ? <GuestProfile key={guest.id} guest={guest} /> : null}
     </Sheet>
   );

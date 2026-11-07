@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { config } from "./config";
 import { ensureReady } from "./db";
 
 /** An error with an HTTP status and a short machine-readable code the client can react to. */
@@ -20,16 +21,18 @@ export const notFound = (what = "Record") => new ApiError(404, "not_found", `${w
  * Wraps a route handler: makes sure the database is ready, blocks requests
  * coming from other websites, and turns errors into tidy JSON.
  */
-export function route(handler: (request: Request) => Promise<unknown>) {
+export function route(handler: (request: Request) => Promise<unknown>, opts: { fromWebsite?: boolean } = {}) {
   return async (request: Request) => {
+    // The public website's forms (Contact us, the waitlist) post here from its own domain.
+    const cors = opts.fromWebsite ? websiteCors(request) : {};
     try {
-      if (request.method !== "GET") assertSameOrigin(request);
+      if (request.method !== "GET") assertSameOrigin(request, !!opts.fromWebsite);
       await ensureReady();
       const result = await handler(request);
-      return NextResponse.json(result ?? { ok: true }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(result ?? { ok: true }, { headers: { "Cache-Control": "no-store", ...cors } });
     } catch (error) {
       if (error instanceof ApiError) {
-        return NextResponse.json({ ok: false, code: error.code, error: error.message, ...error.extra }, { status: error.status });
+        return NextResponse.json({ ok: false, code: error.code, error: error.message, ...error.extra }, { status: error.status, headers: cors });
       }
       console.error("[api]", error);
       const code = (error as { code?: string })?.code;
@@ -46,11 +49,33 @@ export function route(handler: (request: Request) => Promise<unknown>) {
   };
 }
 
-/** Changes are only accepted from pages of this app, as JSON. Stops other sites acting through a signed-in browser. */
-function assertSameOrigin(request: Request) {
+const websiteOrigin = () => (config.siteUrl ? new URL(config.siteUrl).origin : null);
+
+/** Lets the public website's own address call a route (and nothing else). */
+function websiteCors(request: Request): Record<string, string> {
+  const origin = request.headers.get("origin");
+  return origin && origin === websiteOrigin() ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : { Vary: "Origin" };
+}
+
+/** The browser's check before the website posts a form: only the website's address is allowed. */
+export function websitePreflight(request: Request) {
+  const cors = websiteCors(request);
+  if (!cors["Access-Control-Allow-Origin"]) return new Response(null, { status: 403, headers: cors });
+  return new Response(null, {
+    status: 204,
+    headers: { ...cors, "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Max-Age": "86400" },
+  });
+}
+
+/**
+ * Changes are only accepted from pages of this app, as JSON. Stops other sites acting through a signed-in browser.
+ * A route open to the website also accepts the website's own address (it carries no sign-in).
+ */
+function assertSameOrigin(request: Request, fromWebsite = false) {
   const origin = request.headers.get("origin");
   const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  if (origin && host && new URL(origin).host !== host) throw new ApiError(403, "forbidden", "Request not allowed from this origin.");
+  const allowed = fromWebsite && origin !== null && origin === websiteOrigin();
+  if (origin && host && new URL(origin).host !== host && !allowed) throw new ApiError(403, "forbidden", "Request not allowed from this origin.");
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
     throw new ApiError(415, "bad_request", "Send JSON.");
   }

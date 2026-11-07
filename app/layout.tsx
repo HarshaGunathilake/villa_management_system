@@ -10,8 +10,7 @@ export const metadata: Metadata = {
   title: "LankaStay",
   description: "Bookings, guests and expenses for small villas in Sri Lanka.",
   applicationName: "LankaStay",
-  // The app behind sign-in stays out of search results. Public pages (home, features,
-  // pricing, about, contact, register) switch this on with pageMeta() in lib/server/seo.ts.
+  // The app stays out of search results. The public website is a separate project on its own domain.
   robots: { index: false, follow: false },
 };
 

@@ -35,7 +35,7 @@ export function BookingSheet() {
   };
 
   return (
-    <Sheet open={!!booking} onOpenChange={close} title={view === "edit" ? "Edit booking" : view === "checkout" ? "Check out" : "Booking"}>
+    <Sheet viewing open={!!booking} onOpenChange={close} title={view === "edit" ? "Edit booking" : view === "checkout" ? "Check out" : "Booking"}>
       {booking ? (
         view === "edit" ? (
           <EditBooking key={booking.id} booking={booking} onDone={() => setChosen("details")} />

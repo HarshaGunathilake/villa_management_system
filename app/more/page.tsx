@@ -3,11 +3,14 @@
 import Link from "next/link";
 import { ChevronRight, LogOut } from "lucide-react";
 import { MORE_LINKS, PageHeader } from "@/components/app-shell";
+import { BillCount } from "@/components/bill-sheets";
+import { billsDueSoon } from "@/lib/bills";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 
 const NOTES: Record<string, string> = {
-  "/expenses": "Bills, cleaning, repairs",
+  "/expenses": "Everything you spend on the villa",
+  "/bills": "Electricity, water, internet: reminders when they are due",
   "/staff": "Your staff and their monthly payslips",
   "/money": "Revenue, expenses and profit this month",
   "/reports": "Income, expenses and profit over time, charts and CSV",
@@ -18,7 +21,8 @@ const NOTES: Record<string, string> = {
 };
 
 export default function MorePage() {
-  const { villa, signOut } = useStore();
+  const { villa, signOut, bills, billPayments, today } = useStore();
+  const billsSoon = billsDueSoon(bills, billPayments, today);
   return (
     <div>
       <PageHeader title="More" subtitle={`${villa.name}, ${villa.location}`} />
@@ -33,6 +37,7 @@ export default function MorePage() {
                 <span className="block text-lg font-semibold">{item.label}</span>
                 <span className="block text-muted">{NOTES[item.href]}</span>
               </span>
+              {item.href === "/bills" ? <BillCount dues={billsSoon} /> : null}
               <ChevronRight className="size-5 text-line-strong" aria-hidden />
             </Link>
           </li>

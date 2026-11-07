@@ -1,6 +1,6 @@
 import { supportContact } from "@/lib/server/auth";
 import { layout, mailConfigured, sendEmail } from "@/lib/server/mail";
-import { ApiError, email, oneOf, readJson, route, text } from "@/lib/server/http";
+import { ApiError, email, oneOf, readJson, route, websitePreflight, text } from "@/lib/server/http";
 
 /*
  * Public: the Contact us form. The message is emailed to the support address
@@ -61,4 +61,7 @@ export const POST = route(async (request) => {
   });
   if (!result.ok) throw new ApiError(502, "email_failed", "Your message couldn't be sent just now. Please try again, or email us directly.");
   return { ok: true };
-});
+}, { fromWebsite: true });
+
+/** The website (its own domain) asks before posting. */
+export const OPTIONS = websitePreflight;

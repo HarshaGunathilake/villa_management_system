@@ -243,6 +243,35 @@ TABLES.push(
     CONSTRAINT payslips_villa_fk FOREIGN KEY (villa_id) REFERENCES villas (id) ON DELETE CASCADE
   )`,
   // Which monthly reports have gone out, so a month is never emailed twice.
+  // Bills that come round again (electricity, water, internet...), and each time one was paid or skipped.
+  `CREATE TABLE IF NOT EXISTS bills (
+    villa_id VARCHAR(40) NOT NULL,
+    id VARCHAR(40) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    category VARCHAR(30) NOT NULL,
+    amount INT NOT NULL DEFAULT 0,
+    repeat_every ENUM('monthly','quarterly','yearly') NOT NULL DEFAULT 'monthly',
+    due_day TINYINT NOT NULL,
+    start_month CHAR(7) NOT NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    note VARCHAR(500) NULL,
+    position BIGINT NOT NULL AUTO_INCREMENT,
+    PRIMARY KEY (villa_id, id),
+    KEY bills_position (position),
+    CONSTRAINT bills_villa_fk FOREIGN KEY (villa_id) REFERENCES villas (id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS bill_payments (
+    villa_id VARCHAR(40) NOT NULL,
+    bill_id VARCHAR(40) NOT NULL,
+    period CHAR(7) NOT NULL,
+    paid_on DATE NOT NULL,
+    amount INT NOT NULL DEFAULT 0,
+    expense_id VARCHAR(40) NULL,
+    skipped TINYINT(1) NOT NULL DEFAULT 0,
+    PRIMARY KEY (villa_id, bill_id, period),
+    KEY bill_payments_expense (villa_id, expense_id),
+    CONSTRAINT bill_payments_bill_fk FOREIGN KEY (villa_id, bill_id) REFERENCES bills (villa_id, id) ON DELETE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS monthly_reports_sent (
     villa_id VARCHAR(40) NOT NULL,
     month CHAR(7) NOT NULL,
@@ -303,7 +332,7 @@ async function upgrade(db: Db) {
   await db.run("UPDATE platform_settings SET value = 'LankaStay' WHERE name = 'platformName' AND value = 'Villa Stay Manager'");
 }
 
-export const TABLE_NAMES = ["monthly_reports_sent", "payslips", "staff", "waitlist", "email_log", "email_verifications", "password_resets", "dodo_webhook_events", "dodo_products", "amenities", "expenses", "bookings", "guests", "rooms", "platform_settings", "activity_log", "subscription_payments", "sessions", "users", "villas"];
+export const TABLE_NAMES = ["bill_payments", "bills", "monthly_reports_sent", "payslips", "staff", "waitlist", "email_log", "email_verifications", "password_resets", "dodo_webhook_events", "dodo_products", "amenities", "expenses", "bookings", "guests", "rooms", "platform_settings", "activity_log", "subscription_payments", "sessions", "users", "villas"];
 
 export async function createSchema(db: Db) {
   for (const ddl of TABLES) await db.run(ddl);

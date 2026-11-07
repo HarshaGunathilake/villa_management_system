@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
   BedDouble,
+  CalendarClock,
   CalendarDays,
   Check,
   ClipboardList,
@@ -23,12 +24,15 @@ import {
 } from "lucide-react";
 import { AccessDisabled, ServerUnavailable, SubscriptionEnded, VerifyEmail } from "@/components/access-screens";
 import { AdminApp } from "@/components/admin/admin-app";
+import { BillCount } from "@/components/bill-sheets";
 import { BookingSheet } from "@/components/booking-sheet";
 import { ExpenseSheet } from "@/components/expense-sheet";
 import { GuestFormSheet, GuestSheet } from "@/components/guest-sheets";
 import { GuideTour } from "@/components/guide-tour";
+import { SubscribeBanner, SubscribeDialog } from "@/components/subscribe-dialog";
 import { PaymentDueBanner } from "@/components/subscription-card";
 import { Button } from "@/components/ui/button";
+import { billsDueSoon } from "@/lib/bills";
 import { StoreProvider, useStore, type BookingDraft } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +45,7 @@ const NAV = [
 
 const MORE = [
   { href: "/expenses", label: "Expenses", icon: Receipt },
+  { href: "/bills", label: "Bills", icon: CalendarClock },
   { href: "/staff", label: "Staff", icon: IdCard },
   { href: "/money", label: "Money", icon: Wallet },
   { href: "/reports", label: "Reports", icon: BarChart3 },
@@ -52,8 +57,10 @@ const MORE = [
 
 export function useStartBooking() {
   const router = useRouter();
-  const { setDraft, openBooking, openGuest } = useStore();
+  const { setDraft, openBooking, openGuest, awaitingPayment, setSubscribeOpen } = useStore();
   return (draft?: BookingDraft) => {
+    // Not subscribed yet: ask them to, instead of opening a form they can't save.
+    if (awaitingPayment) return setSubscribeOpen(true);
     openBooking(null);
     openGuest(null);
     setDraft(draft ?? null);
@@ -61,13 +68,8 @@ export function useStartBooking() {
   };
 }
 
-/** The public website: no sign-in, no villa data. */
-const SITE_PAGES = new Set(["/", "/features", "/pricing", "/about", "/contact"]);
-
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  // The public landing page: no sign-in, no villa data.
-  if (SITE_PAGES.has(pathname)) return <>{children}</>;
   // Password reset pages work the same for villa owners and the Super Admin, signed in or not.
   if (pathname === "/forgot-password" || pathname === "/reset-password" || pathname === "/verify-email") return <>{children}</>;
   // The Super Admin area is a separate app with its own sign-in and data. Villa data is never loaded there.
@@ -82,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 function Frame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { ready, villa, toast, signedIn, signOut, access, support, renewal, unverifiedEmail, accessError, reload, readOnly, subscription } = useStore();
+  const { ready, villa, toast, signedIn, signOut, access, support, renewal, unverifiedEmail, accessError, reload, readOnly, subscription, bills, billPayments, today, awaitingPayment } = useStore();
   const startBooking = useStartBooking();
   const onLogin = pathname === "/login" || pathname === "/register";
 
@@ -136,6 +138,7 @@ function Frame({ children }: { children: React.ReactNode }) {
   const isActive = (href: string) => pathname.startsWith(href);
   const moreActive = pathname === "/more" || MORE.some((m) => isActive(m.href));
   const showFab = ["/dashboard", "/calendar", "/bookings"].includes(pathname);
+  const billsSoon = billsDueSoon(bills, billPayments, today);
 
   return (
     <div className="min-h-dvh lg:pl-64">
@@ -163,6 +166,7 @@ function Frame({ children }: { children: React.ReactNode }) {
             >
               <item.icon className={cn("size-5", isActive(item.href) && "text-brass-deep")} />
               {item.label}
+              {item.href === "/bills" ? <BillCount dues={billsSoon} className="ml-auto" /> : null}
             </Link>
           ))}
         </nav>
@@ -182,7 +186,7 @@ function Frame({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Payment due: everything stays visible, but changes are paused until it is paid. */}
-        {readOnly && subscription ? <PaymentDueBanner subscription={subscription} showLink={!pathname.startsWith("/subscription")} /> : null}
+        {awaitingPayment ? <SubscribeBanner /> : readOnly && subscription ? <PaymentDueBanner subscription={subscription} showLink={!pathname.startsWith("/subscription")} /> : null}
         {children}
       </main>
 
@@ -214,8 +218,9 @@ function Frame({ children }: { children: React.ReactNode }) {
                   active && "text-ink",
                 )}
               >
-                <span className={cn("grid h-7 w-12 place-items-center rounded-full", active && "bg-brass-soft text-brass-deep")}>
+                <span className={cn("relative grid h-7 w-12 place-items-center rounded-full", active && "bg-brass-soft text-brass-deep")}>
                   <item.icon className="size-[1.375rem]" />
+                  {item.href === "/more" ? <BillCount dues={billsSoon} className="absolute -top-1.5 right-0 h-5 min-w-5 text-xs ring-2 ring-card" /> : null}
                 </span>
                 {item.label}
               </Link>
@@ -231,6 +236,8 @@ function Frame({ children }: { children: React.ReactNode }) {
 
       {/* A new owner's first visit */}
       {!inBookingFlow ? <GuideTour /> : null}
+      {/* Not paid yet: look around, then subscribe */}
+      <SubscribeDialog />
 
       <Toast message={toast} />
     </div>

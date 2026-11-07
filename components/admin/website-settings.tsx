@@ -8,6 +8,7 @@ import { Toggle } from "@/components/ui/field";
 import { useAdmin, useAdminData } from "@/lib/admin-store";
 import { api } from "@/lib/api";
 import { downloadCsv } from "@/lib/csv";
+import { SITE_URL } from "@/lib/site-url";
 
 /*
  * Super Admin → Settings → Website: keep the public site out of search engines,
@@ -40,8 +41,8 @@ export function WebsiteSettings() {
         <span className="min-w-0 flex-1">
           <span className="block font-medium">Coming soon page</span>
           <span className="block text-sm text-muted">
-            Visitors to the website see a Coming soon page with a &ldquo;Tell me when it opens&rdquo; form, and new sign-ups wait. Villa owners can still sign in, and you
-            still see the real pages while signed in here.
+            Visitors to the website see a Coming soon page with a &ldquo;Tell me when it opens&rdquo; form, and new sign-ups wait. Villa owners can still sign in. To check
+            the real pages, open the website&apos;s preview link (/preview?key=…, set by PREVIEW_KEY). Changes show on the website within a minute.
           </span>
         </span>
         <Toggle
@@ -85,13 +86,13 @@ export function WebsiteSettings() {
           <span aria-hidden className={`size-2.5 rounded-full ${indexingEffective ? "bg-sage" : "bg-stone"}`} />
           {indexingEffective ? "Visible to search engines" : "Hidden from search engines"}
         </span>
-        <a href="/robots.txt" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-brass-deep underline-offset-4 hover:underline">
+        <a href={`${SITE_URL}/robots.txt`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-brass-deep underline-offset-4 hover:underline">
           robots.txt <ExternalLink className="size-3.5" aria-hidden />
         </a>
-        <a href="/sitemap.xml" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-brass-deep underline-offset-4 hover:underline">
+        <a href={`${SITE_URL}/sitemap.xml`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-brass-deep underline-offset-4 hover:underline">
           sitemap.xml <ExternalLink className="size-3.5" aria-hidden />
         </a>
-        <a href="/" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-brass-deep underline-offset-4 hover:underline">
+        <a href={SITE_URL || "/"} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-brass-deep underline-offset-4 hover:underline">
           Open the website <ExternalLink className="size-3.5" aria-hidden />
         </a>
         {busy ? <span className="text-muted">Saving…</span> : null}

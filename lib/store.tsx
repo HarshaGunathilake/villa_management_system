@@ -5,8 +5,9 @@ import { api, type ApiFailure, type Renewal, type SupportContact } from "./api";
 import { checkAvailability, type Availability } from "./availability";
 import { todayISO } from "./dates";
 import { fmtTime } from "./times";
+import { billExpense } from "./bills";
 import { payslipExpense } from "./payroll";
-import type { Amenity, AppData, Booking, BookingExtra, Expense, Guest, Payslip, Room, Staff, Villa, VillaSubscription } from "./types";
+import type { Amenity, AppData, Bill, Booking, BookingExtra, Expense, Guest, Payslip, Room, Staff, Villa, VillaSubscription } from "./types";
 import { extrasTotal, uid } from "./utils";
 
 export interface BookingDraft {
@@ -46,6 +47,14 @@ interface Store extends AppData {
    * but nothing can be added or changed until it is paid.
    */
   readOnly: boolean;
+  /**
+   * A new sign-up that has not made its first payment: the villa can be seen,
+   * but nothing works until they subscribe. Holds what subscribing costs.
+   */
+  awaitingPayment: Renewal | null;
+  /** The "Start your subscription" popup */
+  subscribeOpen: boolean;
+  setSubscribeOpen: (open: boolean) => void;
   /** A new owner's first visit: show the guide */
   tourPending: boolean;
   /** The guide was finished or skipped; it won't show again */
@@ -97,6 +106,17 @@ interface Store extends AppData {
   /** Removes the payslip and, if it was paid, its expense. */
   deletePayslip: (id: string) => void;
 
+  addBill: (bill: Omit<Bill, "id">) => Bill | null;
+  updateBill: (id: string, patch: Partial<Bill>) => void;
+  /** Removes the bill and its payment records. The expenses it became stay. */
+  removeBill: (id: string) => void;
+  /** Marks one due date paid and adds it to Expenses. */
+  payBill: (billId: string, period: string, paidOn: string, amount: number) => void;
+  /** Marks one due date as dealt with, without an expense. */
+  skipBill: (billId: string, period: string) => void;
+  /** Undoes a payment or skip; a paid one's expense is removed too. */
+  undoBillPayment: (billId: string, period: string) => void;
+
   // Panels that can be opened from anywhere
   openBookingId: string | null;
   openBooking: (id: string | null) => void;
@@ -129,6 +149,8 @@ const EMPTY: AppData = {
   amenities: [],
   staff: [],
   payslips: [],
+  bills: [],
+  billPayments: [],
 };
 
 type VillaAction = { type: string } & Record<string, unknown>;
@@ -149,6 +171,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [access, setAccess] = useState<Access>("loading");
   const [support, setSupport] = useState<SupportContact | null>(null);
   const [renewal, setRenewal] = useState<Renewal | null>(null);
+  const [awaitingPayment, setAwaitingPayment] = useState<Renewal | null>(null);
+  // Opens by itself the first time a new sign-up lands in the app, but not over
+  // the Subscription page, where they are paying or just came back from paying.
+  const [subscribeOpen, setSubscribeOpen] = useState(() => typeof window === "undefined" || !window.location.pathname.startsWith("/subscription"));
   const [accessError, setAccessError] = useState<string | null>(null);
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [serverTour, setServerTour] = useState(false);
@@ -211,9 +237,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const reload = useCallback(async () => {
-    const result = await api<{ data: AppData; subscription?: VillaSubscription; tour?: boolean }>("/api/villa/data");
+    const result = await api<{ data: AppData; subscription?: VillaSubscription; tour?: boolean; firstPayment?: Renewal | null }>("/api/villa/data");
     if (result.ok) {
       setServerTour(result.tour === true);
+      setAwaitingPayment(result.firstPayment ?? null);
       setData(result.data);
       setSubscription(result.subscription ?? null);
       setAccessError(null);
@@ -272,10 +299,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const store = useMemo<Store>(() => {
     const d = data ?? EMPTY;
-    const readOnly = access === "ok" && !!subscription && subscription.status !== "active";
-    /** True (and says so) when the villa is read-only, so the change is not made. */
+    const readOnly = access === "ok" && ((!!subscription && subscription.status !== "active") || !!awaitingPayment);
+    /** True (and says so) when the villa is read-only, so the change is not made. Before the first payment, it asks them to subscribe. */
     const paused = () => {
-      if (readOnly) notify(READ_ONLY_MESSAGE);
+      if (readOnly && awaitingPayment) {
+        // No "Saved" message may follow a change that was not made.
+        pausedAt.current = Date.now();
+        setSubscribeOpen(true);
+      } else if (readOnly) notify(READ_ONLY_MESSAGE);
       return readOnly;
     };
     const pausedResult: SaveResult = { ok: false, reason: "payment_due", title: "Payment due", message: READ_ONLY_MESSAGE, conflicts: [] };
@@ -291,7 +322,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       support,
       renewal,
       unverifiedEmail,
-      tourPending: access === "ok" && serverTour && !tourDone,
+      awaitingPayment: access === "ok" ? awaitingPayment : null,
+      subscribeOpen: access === "ok" && !!awaitingPayment && subscribeOpen,
+      setSubscribeOpen,
+      // The guide waits until they have subscribed and can actually use it.
+      tourPending: access === "ok" && serverTour && !tourDone && !awaitingPayment,
       finishTour() {
         setTourDone(true);
         void api("/api/villa/tour", {});
@@ -395,7 +430,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       },
       deleteExpense(id) {
         if (paused()) return;
-        patch((s) => ({ ...s, expenses: s.expenses.filter((e) => e.id !== id) }));
+        patch((s) => ({ ...s, expenses: s.expenses.filter((e) => e.id !== id), billPayments: s.billPayments.filter((p) => p.expenseId !== id) }));
         send({ type: "deleteExpense", id });
       },
 
@@ -484,6 +519,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         send({ type: "deletePayslip", id });
       },
 
+      addBill(bill) {
+        if (paused()) return null;
+        const created: Bill = { ...bill, id: uid("bill") };
+        patch((s) => ({ ...s, bills: [...s.bills, created] }));
+        send({ type: "addBill", bill: created });
+        return created;
+      },
+      updateBill(id, change) {
+        if (paused()) return;
+        patch((s) => ({ ...s, bills: s.bills.map((b) => (b.id === id ? { ...b, ...change } : b)) }));
+        send({ type: "updateBill", id, patch: change });
+      },
+      removeBill(id) {
+        if (paused()) return;
+        patch((s) => ({ ...s, bills: s.bills.filter((b) => b.id !== id), billPayments: s.billPayments.filter((p) => p.billId !== id) }));
+        send({ type: "deleteBill", id });
+      },
+      payBill(billId, period, paidOn, amount) {
+        if (paused()) return;
+        const bill = d.bills.find((b) => b.id === billId);
+        if (!bill || d.billPayments.some((p) => p.billId === billId && p.period === period)) return;
+        const expenseId = uid("e");
+        patch((s) => ({
+          ...s,
+          billPayments: [{ billId, period, paidOn, amount, expenseId, skipped: false }, ...s.billPayments],
+          expenses: [{ id: expenseId, date: paidOn, amount, ...billExpense(bill, period) }, ...s.expenses],
+        }));
+        send({ type: "payBill", billId, period, paidOn, amount, expenseId });
+      },
+      skipBill(billId, period) {
+        if (paused()) return;
+        if (d.billPayments.some((p) => p.billId === billId && p.period === period)) return;
+        patch((s) => ({ ...s, billPayments: [{ billId, period, paidOn: today, amount: 0, skipped: true }, ...s.billPayments] }));
+        send({ type: "skipBill", billId, period, paidOn: today });
+      },
+      undoBillPayment(billId, period) {
+        if (paused()) return;
+        const done = d.billPayments.find((p) => p.billId === billId && p.period === period);
+        if (!done) return;
+        patch((s) => ({
+          ...s,
+          billPayments: s.billPayments.filter((p) => !(p.billId === billId && p.period === period)),
+          expenses: s.expenses.filter((e) => !done.expenseId || e.id !== done.expenseId),
+        }));
+        send({ type: "undoBillPayment", billId, period });
+      },
+
       openBookingId,
       openBooking,
       openCheckout,
@@ -499,7 +581,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toast,
       notify,
     };
-  }, [data, subscription, today, access, support, renewal, unverifiedEmail, serverTour, tourDone, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
+  }, [data, subscription, today, access, support, renewal, awaitingPayment, subscribeOpen, unverifiedEmail, serverTour, tourDone, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
@@ -507,6 +589,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 /** True while the villa is read-only because its payment is due. False outside the villa app (the Super Admin area). */
 export function useReadOnly() {
   return useContext(StoreContext)?.readOnly ?? false;
+}
+
+/** Before the first payment: opens the subscribe popup. Null once subscribed. */
+export function useSubscribePrompt() {
+  const store = useContext(StoreContext);
+  const awaiting = !!store?.awaitingPayment;
+  const setOpen = store?.setSubscribeOpen;
+  return useMemo(() => (awaiting && setOpen ? () => setOpen(true) : null), [awaiting, setOpen]);
 }
 
 export function useStore() {

@@ -156,7 +156,7 @@ function Admins({ villa, admins }: { villa: AdminVilla; admins: AdminUser[] }) {
       {villa.accountStatus === "disabled" ? (
         <p className="rounded-xl border border-line bg-well px-4 py-3 text-[0.9375rem]">
           {villa.disabledReason === "unpaid"
-            ? "This villa signed up itself and has not made its first payment yet. Its admin can only sign in to pay; it opens by itself once the payment goes through."
+            ? "This villa signed up itself and has not made its first payment yet. Its admin can sign in and look around, but cannot change anything until they subscribe; it opens by itself once the payment goes through."
             : villa.disabledReason === "subscription"
               ? "The villa's card subscription ended, so its admins can only sign in to pay again."
               : "The villa itself is disabled, so no admin can log in even if their own account is active."}

@@ -9,6 +9,7 @@ import { fmtLong } from "@/lib/dates";
 import { ServerUnavailable } from "@/components/access-screens";
 import { AdminProvider, useAdmin } from "@/lib/admin-store";
 import { cn } from "@/lib/utils";
+import { SITE_URL } from "@/lib/site-url";
 
 const NAV = [
   {
@@ -141,7 +142,7 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
         </nav>
 
         <a
-          href="/"
+          href={SITE_URL || "/"}
           target="_blank"
           rel="noreferrer"
           className="mb-3 flex min-h-11 items-center gap-3 rounded-xl px-3 text-[0.9375rem] font-medium text-white/65 hover:bg-white/[0.06] hover:text-white"
