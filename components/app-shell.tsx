@@ -91,7 +91,13 @@ function Frame({ children }: { children: React.ReactNode }) {
   // Nothing in the app opens without signing in first.
   useEffect(() => {
     if (access === "signed_out" && !onLogin) router.replace("/login");
-    if (signedIn && onLogin) router.replace("/dashboard");
+    if (!(signedIn && onLogin)) return;
+    router.replace("/dashboard");
+    // If the in-page switch doesn't happen (seen through tunnels such as ngrok), load the dashboard the ordinary way.
+    const fallback = setTimeout(() => {
+      if (window.location.pathname === "/login" || window.location.pathname === "/register") window.location.replace("/dashboard");
+    }, 2000);
+    return () => clearTimeout(fallback);
   }, [access, signedIn, onLogin, router]);
 
   if (access === "error") return <ServerUnavailable message={accessError} onRetry={() => void reload()} />;
@@ -106,7 +112,7 @@ function Frame({ children }: { children: React.ReactNode }) {
     return (
       <>
         {/* Shown straight away (also in the server's HTML); a signed-in owner is sent on to the dashboard. */}
-        {signedIn ? null : children}
+        {signedIn ? <Opening label="Opening your dashboard…" /> : children}
         <Toast message={toast} />
       </>
     );
@@ -311,3 +317,15 @@ export function EmptyState({ title, children, action }: { title: string; childre
 }
 
 export { MORE as MORE_LINKS };
+
+/** Shown for the moment between signing in and the dashboard appearing. */
+function Opening({ label }: { label: string }) {
+  return (
+    <div className="grid min-h-dvh place-items-center px-5" role="status" aria-live="polite">
+      <div className="flex items-center gap-3 text-lg text-muted">
+        <span className="size-5 animate-spin rounded-full border-2 border-line-strong border-t-ink" aria-hidden />
+        {label}
+      </div>
+    </div>
+  );
+}

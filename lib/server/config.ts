@@ -41,7 +41,21 @@ export const config = {
     /** Customers are billed with a Sri Lankan billing country, so prices stay in LKR. */
     country: "LK",
   },
+  /** Uploaded files (expense and bill receipts) go to a DigitalOcean Space. Leave the keys empty and uploads stay switched off. */
+  storage: {
+    accessKey: process.env.DO_ACCESS_KEY_ID ?? "",
+    secretKey: process.env.DO_SECRET_ACCESS_KEY ?? "",
+    region: process.env.DO_DEFAULT_REGION || "sfo3",
+    /** The Space (bucket) name */
+    space: process.env.DO_SPACE ?? "",
+    /** https://sfo3.digitaloceanspaces.com, or the Space's own address (https://<space>.sfo3.digitaloceanspaces.com); both work */
+    endpoint: (process.env.DO_ENDPOINT ?? "").replace(/\/+$/, ""),
+    /** The folder inside the Space that all of this app's uploads go into */
+    folder: (process.env.DO_FOLDER || "Bills").replace(/^\/+|\/+$/g, ""),
+  },
 };
+
+export const storageEnabled = () => !!(config.storage.accessKey && config.storage.secretKey && config.storage.space && config.storage.endpoint);
 
 export const dodoEnabled = () => config.dodo.apiKey !== "" && config.dodo.webhookKey !== "";
 

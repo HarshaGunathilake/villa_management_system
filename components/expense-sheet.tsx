@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Paperclip, X } from "lucide-react";
+import { useState } from "react";
+import { ReceiptPicker, type Receipt } from "@/components/receipt-picker";
 import { Button } from "@/components/ui/button";
 import { Chip, Field, Input, MoneyInput, Textarea } from "@/components/ui/field";
 import { Sheet } from "@/components/ui/sheet";
@@ -24,10 +24,10 @@ function ExpenseForm() {
   const [amount, setAmount] = useState(0);
   const [date, setDate] = useState(today);
   const [note, setNote] = useState("");
-  const [receipt, setReceipt] = useState<string | undefined>();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [uploading, setUploading] = useState(false);
 
-  const valid = amount > 0 && category !== null && date;
+  const valid = amount > 0 && category !== null && date && !uploading;
 
   return (
     <div className="space-y-6">
@@ -58,22 +58,7 @@ function ExpenseForm() {
         {(id) => <Textarea id={id} value={note} onChange={(e) => setNote(e.target.value)} className="min-h-20" />}
       </Field>
 
-      <div>
-        <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => setReceipt(e.target.files?.[0]?.name)} />
-        {receipt ? (
-          <div className="flex items-center gap-3 rounded-xl border border-line bg-card px-4 py-3">
-            <Paperclip className="size-5 text-muted" />
-            <span className="min-w-0 flex-1 truncate">{receipt}</span>
-            <button type="button" className="grid size-9 place-items-center rounded-full hover:bg-well" aria-label="Remove receipt" onClick={() => setReceipt(undefined)}>
-              <X className="size-4" />
-            </button>
-          </div>
-        ) : (
-          <Button variant="secondary" block onClick={() => fileRef.current?.click()}>
-            <Paperclip /> Attach a receipt photo
-          </Button>
-        )}
-      </div>
+      <ReceiptPicker value={receipt} onChange={setReceipt} onBusy={setUploading} label="Attach a receipt photo or PDF" />
 
       <Button
         size="lg"
@@ -81,7 +66,7 @@ function ExpenseForm() {
         disabled={!valid}
         onClick={() => {
           if (!category) return;
-          addExpense({ name: name.trim() || `${category}`, category, amount, date, note: note.trim() || undefined, receiptName: receipt });
+          addExpense({ name: name.trim() || `${category}`, category, amount, date, note: note.trim() || undefined, receiptName: receipt?.name, receiptKey: receipt?.key });
           notify("Expense added");
           setExpenseFormOpen(false);
         }}

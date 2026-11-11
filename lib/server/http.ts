@@ -21,14 +21,16 @@ export const notFound = (what = "Record") => new ApiError(404, "not_found", `${w
  * Wraps a route handler: makes sure the database is ready, blocks requests
  * coming from other websites, and turns errors into tidy JSON.
  */
-export function route(handler: (request: Request) => Promise<unknown>, opts: { fromWebsite?: boolean } = {}) {
+export function route(handler: (request: Request) => Promise<unknown>, opts: { fromWebsite?: boolean; fileUpload?: boolean } = {}) {
   return async (request: Request) => {
     // The public website's forms (Contact us, the waitlist) post here from its own domain.
     const cors = opts.fromWebsite ? websiteCors(request) : {};
     try {
-      if (request.method !== "GET") assertSameOrigin(request, !!opts.fromWebsite);
+      if (request.method !== "GET") assertSameOrigin(request, !!opts.fromWebsite, !!opts.fileUpload);
       await ensureReady();
       const result = await handler(request);
+      // A handler may answer with its own response, for example a redirect to a file.
+      if (result instanceof Response) return result;
       return NextResponse.json(result ?? { ok: true }, { headers: { "Cache-Control": "no-store", ...cors } });
     } catch (error) {
       if (error instanceof ApiError) {
@@ -71,11 +73,17 @@ export function websitePreflight(request: Request) {
  * Changes are only accepted from pages of this app, as JSON. Stops other sites acting through a signed-in browser.
  * A route open to the website also accepts the website's own address (it carries no sign-in).
  */
-function assertSameOrigin(request: Request, fromWebsite = false) {
+function assertSameOrigin(request: Request, fromWebsite = false, fileUpload = false) {
   const origin = request.headers.get("origin");
   const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
   const allowed = fromWebsite && origin !== null && origin === websiteOrigin();
   if (origin && host && new URL(origin).host !== host && !allowed) throw new ApiError(403, "forbidden", "Request not allowed from this origin.");
+  // A file comes as a form, which other sites could also send: so it must say it comes from this app's own address.
+  if (fileUpload) {
+    if (!origin || !host || new URL(origin).host !== host) throw new ApiError(403, "forbidden", "Request not allowed from this origin.");
+    if (!(request.headers.get("content-type") ?? "").includes("multipart/form-data")) throw new ApiError(415, "bad_request", "Send the file as a form.");
+    return;
+  }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
     throw new ApiError(415, "bad_request", "Send JSON.");
   }

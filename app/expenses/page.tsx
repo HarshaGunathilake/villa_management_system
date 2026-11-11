@@ -81,9 +81,20 @@ export default function ExpensesPage() {
                     <div className="mt-2 sm:pl-[3.75rem] text-[0.9375rem] text-muted">
                       {e.note}
                       {e.receiptName ? (
-                        <span className="mt-1 flex items-center gap-1.5">
-                          <Paperclip className="size-4" /> {e.receiptName}
-                        </span>
+                        e.hasReceipt ? (
+                          <a
+                            href={`/api/villa/receipts/${encodeURIComponent(e.id)}`}
+                            target="_blank"
+                            rel="noopener"
+                            className="mt-1 flex w-fit max-w-full items-center gap-1.5 font-medium text-brass-deep underline-offset-4 hover:underline"
+                          >
+                            <Paperclip className="size-4 shrink-0" /> <span className="truncate">{e.receiptName}</span>
+                          </a>
+                        ) : (
+                          <span className="mt-1 flex items-center gap-1.5">
+                            <Paperclip className="size-4" /> {e.receiptName}
+                          </span>
+                        )
                       ) : null}
                     </div>
                   ) : null}

@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BedDouble, CalendarDays, Plus, Receipt, Settings, Sparkles, Users, X } from "lucide-react";
+import { BarChart3, BedDouble, CalendarClock, CalendarDays, ClipboardList, ConciergeBell, CreditCard, IdCard, Plus, Receipt, Settings, Sparkles, Users, Wallet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /*
- * The first-time guide for a new villa owner: a welcome, six short stops that
- * point at the real buttons, and a last card with the next thing to do.
+ * The first-time guide for a new villa owner: a welcome, a short stop at every part of the app
+ * (each points at the real button), and a last card with the next thing to do.
  * It shows once per owner; finishing or skipping it is saved on the server.
  */
 
@@ -32,6 +32,20 @@ const STOPS: Stop[] = [
     onMore: "Rooms are under More.",
   },
   {
+    targets: ["/settings", "/more"],
+    icon: Settings,
+    title: "Villa settings",
+    text: "Check-in and check-out times, the entire-villa price and your password.",
+    onMore: "Villa settings are under More.",
+  },
+  {
+    targets: ["/amenities", "/more"],
+    icon: ConciergeBell,
+    title: "Amenities and extras",
+    text: "Set up the extras you offer, like meals, airport pickups or tours, with their prices. Add them to any booking and they go on the bill.",
+    onMore: "Amenities are under More.",
+  },
+  {
     targets: ["new-booking", "/bookings"],
     icon: Plus,
     title: "Add a booking",
@@ -44,6 +58,12 @@ const STOPS: Stop[] = [
     text: "The calendar shows which rooms are free, booked, arriving or leaving. Tap a free night to book it.",
   },
   {
+    targets: ["/bookings"],
+    icon: ClipboardList,
+    title: "All your bookings",
+    text: "Search and filter every booking. Record advances and payments, check guests in and out, and send the invoice on WhatsApp.",
+  },
+  {
     targets: ["/guests"],
     icon: Users,
     title: "Your guests",
@@ -52,16 +72,44 @@ const STOPS: Stop[] = [
   {
     targets: ["/expenses", "/more"],
     icon: Receipt,
-    title: "Expenses and money",
-    text: "Write down what you spend. Money shows each month's income, expenses and profit.",
-    onMore: "Expenses and Money are under More.",
+    title: "Expenses",
+    text: "Write down what you spend, by category: supplies, repairs, food and more.",
+    onMore: "Expenses are under More.",
   },
   {
-    targets: ["/settings", "/more"],
-    icon: Settings,
-    title: "Villa settings",
-    text: "Check-in and check-out times, the entire-villa price, and your password.",
-    onMore: "Villa settings are under More.",
+    targets: ["/bills", "/more"],
+    icon: CalendarClock,
+    title: "Bills and reminders",
+    text: "Add bills you pay every month, quarter or year, like electricity, water or internet. Bills due in the next 3 days show on Home, and paying one adds it to your expenses.",
+    onMore: "Bills are under More.",
+  },
+  {
+    targets: ["/staff", "/more"],
+    icon: IdCard,
+    title: "Staff and payslips",
+    text: "Add your staff and their pay. Each month, make payslips with additions, deductions, EPF and ETF, then print them or send them on WhatsApp.",
+    onMore: "Staff is under More.",
+  },
+  {
+    targets: ["/money", "/more"],
+    icon: Wallet,
+    title: "Money",
+    text: "Each month's income, expenses and profit, and the money guests still owe you.",
+    onMore: "Money is under More.",
+  },
+  {
+    targets: ["/reports", "/more"],
+    icon: BarChart3,
+    title: "Reports",
+    text: "Income, expenses, profit and occupancy by month, by room and by booking source. Download them as spreadsheets, or get last month's report by email.",
+    onMore: "Reports are under More.",
+  },
+  {
+    targets: ["/subscription", "/more"],
+    icon: CreditCard,
+    title: "Your subscription",
+    text: "Your plan, card and payment records. Change your card or cancel here at any time.",
+    onMore: "Subscription is under More.",
   },
 ];
 
@@ -80,7 +128,9 @@ function findTarget(keys: string[]): { el: HTMLElement; key: string } | null {
 }
 
 export function GuideTour() {
-  const { tourPending, finishTour, villa, rooms } = useStore();
+  const { tourPending, finishTour, villa, rooms, awaitingPayment, setSubscribeOpen } = useStore();
+  // Looking around before subscribing: the guide ends by offering to start.
+  const trial = awaitingPayment?.trialDays ?? 0;
   const router = useRouter();
   // -1 is the welcome card, STOPS.length the last card.
   const [step, setStep] = useState(-1);
@@ -218,7 +268,8 @@ export function GuideTour() {
               Welcome{first ? `, ${first}` : ""}!
             </h2>
             <p id="tour-text" className="mt-2 text-muted">
-              {villa.name} is ready. Here&apos;s a one-minute look around, so you know where everything is.
+              {villa.name} is ready. Here&apos;s a quick look around, so you know where everything is.
+              {awaitingPayment ? (trial > 0 ? " Bookings and changes start working once you start your free trial." : " Bookings and changes start working once you subscribe.") : null}
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Button ref={primary} onClick={() => setStep(0)}>
@@ -266,17 +317,35 @@ export function GuideTour() {
               <Sparkles className="size-6" aria-hidden />
             </span>
             <h2 id="tour-title" className="mt-4 pr-8 text-2xl leading-tight font-semibold">
-              You&apos;re all set
+              {awaitingPayment ? "Ready when you are" : "You're all set"}
             </h2>
             <p id="tour-text" className="mt-2 text-muted">
-              {hasRooms ? "Your rooms are in. Make your first booking whenever you're ready." : "A good first step: add your rooms, then your first booking."}
+              {awaitingPayment
+                ? trial > 0
+                  ? `Start your ${trial}-day free trial to add your rooms and take bookings. Nothing is charged until the trial ends.`
+                  : "Subscribe to add your rooms and take bookings."
+                : hasRooms
+                  ? "Your rooms are in. Make your first booking whenever you're ready."
+                  : "A good first step: add your rooms, then your first booking."}
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button ref={primary} onClick={() => done(hasRooms ? "/bookings/new" : "/rooms?add=1")}>
-                {hasRooms ? "Make a booking" : "Add your rooms"}
-              </Button>
+              {awaitingPayment ? (
+                <Button
+                  ref={primary}
+                  onClick={() => {
+                    done();
+                    setSubscribeOpen(true);
+                  }}
+                >
+                  {trial > 0 ? "Start free trial" : "Subscribe"}
+                </Button>
+              ) : (
+                <Button ref={primary} onClick={() => done(hasRooms ? "/bookings/new" : "/rooms?add=1")}>
+                  {hasRooms ? "Make a booking" : "Add your rooms"}
+                </Button>
+              )}
               <Button variant="ghost" onClick={() => done()}>
-                Close
+                {awaitingPayment ? "Keep looking" : "Close"}
               </Button>
             </div>
           </>

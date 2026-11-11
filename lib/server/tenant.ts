@@ -25,6 +25,7 @@ import { payslipExpense } from "../payroll";
 import { extrasTotal } from "../utils";
 import { loadBilling, trialOffer } from "./billing";
 import { nowSql, serverToday } from "./config";
+import { deleteStored, villaPrefix } from "./storage";
 import { db, transaction, type Db } from "./db";
 import { ApiError, badRequest, clockTime, integer, isoDate, notFound, oneOf, recordId, text } from "./http";
 
@@ -169,8 +170,8 @@ export async function loadVillaData(villaId: string, userName: string, userEmail
       [villaId],
     ),
     loadBookings(db, villaId),
-    db.query<{ id: string; name: string; category: Expense["category"]; amount: number; date: string; note: string | null; receipt_name: string | null }>(
-      "SELECT id, name, category, amount, date, note, receipt_name FROM expenses WHERE villa_id = ? ORDER BY position DESC",
+    db.query<{ id: string; name: string; category: Expense["category"]; amount: number; date: string; note: string | null; receipt_name: string | null; receipt_key: string | null }>(
+      "SELECT id, name, category, amount, date, note, receipt_name, receipt_key FROM expenses WHERE villa_id = ? ORDER BY position DESC",
       [villaId],
     ),
     db.query<{ id: string; name: string; price: number; unit: Amenity["unit"]; enabled: number }>(
@@ -200,7 +201,7 @@ export async function loadVillaData(villaId: string, userName: string, userEmail
     rooms,
     guests: guests.map((g) => ({ id: g.id, name: g.name, phone: g.phone, email: g.email ?? undefined, country: g.country ?? undefined })),
     bookings,
-    expenses: expenses.map((e) => ({ id: e.id, name: e.name, category: e.category, amount: e.amount, date: e.date, note: e.note ?? undefined, receiptName: e.receipt_name ?? undefined })),
+    expenses: expenses.map((e) => ({ id: e.id, name: e.name, category: e.category, amount: e.amount, date: e.date, note: e.note ?? undefined, receiptName: e.receipt_name ?? undefined, hasReceipt: !!e.receipt_key })),
     amenities: amenities.map((a) => ({ id: a.id, name: a.name, price: a.price, unit: a.unit, enabled: !!a.enabled })),
     staff,
     payslips,
@@ -272,9 +273,17 @@ export async function insertBooking(q: Db, villaId: string, b: Booking) {
 }
 
 export async function insertExpense(q: Db, villaId: string, e: Expense) {
-  await q.run("INSERT INTO expenses (villa_id, id, name, category, amount, date, note, receipt_name) VALUES (?,?,?,?,?,?,?,?)", [
-    villaId, e.id, e.name, e.category, e.amount, e.date, e.note ?? null, e.receiptName ?? null,
+  await q.run("INSERT INTO expenses (villa_id, id, name, category, amount, date, note, receipt_name, receipt_key) VALUES (?,?,?,?,?,?,?,?,?)", [
+    villaId, e.id, e.name, e.category, e.amount, e.date, e.note ?? null, e.receiptName ?? null, e.receiptKey ?? null,
   ]);
+}
+
+/** A receipt key sent by the browser: it must be one of this villa's own uploads. */
+function receiptKey(value: unknown, villaId: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const key = text(value, "Receipt", { max: 400 });
+  if (!key.startsWith(villaPrefix(villaId)) || key.includes("..")) throw badRequest("That receipt doesn't belong to this villa.");
+  return key;
 }
 
 export async function insertAmenity(q: Db, villaId: string, a: Amenity) {
@@ -517,16 +526,20 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
         date: isoDate(input.date, "Date"),
         note: text(input.note, "Note", { max: 500, optional: true }) || undefined,
         receiptName: text(input.receiptName, "Receipt", { max: 255, optional: true }) || undefined,
+        receiptKey: receiptKey(input.receiptKey, villaId),
       });
       return;
     }
     case "deleteExpense": {
       const id = recordId(body.id, "Expense");
+      const stored = await db.one<{ receipt_key: string | null }>("SELECT receipt_key FROM expenses WHERE villa_id = ? AND id = ?", [villaId, id]);
       await transaction(async (tx) => {
         await mustAffect(tx.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, id]), "Expense");
         // A paid bill whose expense is deleted goes back to unpaid.
         await tx.run("DELETE FROM bill_payments WHERE villa_id = ? AND expense_id = ?", [villaId, id]);
       });
+      // Its receipt file goes too, once the expense is gone.
+      await deleteStored(stored?.receipt_key);
       return;
     }
 
@@ -730,7 +743,16 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
         const amount = integer(body.amount, "Amount", { min: 1, max: 100_000_000 });
         const expenseId = recordId(body.expenseId, "Expense id");
         const e = billExpense(bill, period);
-        await insertExpense(tx, villaId, { id: expenseId, name: e.name.slice(0, 160), category: e.category, amount, date: paidOn, note: e.note });
+        await insertExpense(tx, villaId, {
+          id: expenseId,
+          name: e.name.slice(0, 160),
+          category: e.category,
+          amount,
+          date: paidOn,
+          note: e.note,
+          receiptName: text(body.receiptName, "Receipt", { max: 255, optional: true }) || undefined,
+          receiptKey: receiptKey(body.receiptKey, villaId),
+        });
         await tx.run("INSERT INTO bill_payments (villa_id, bill_id, period, paid_on, amount, expense_id, skipped) VALUES (?,?,?,?,?,?,0)", [villaId, billId, period, paidOn, amount, expenseId]);
       });
       return;
@@ -738,12 +760,15 @@ export async function runVillaAction(ctx: VillaContext, body: Body): Promise<voi
     case "undoBillPayment": {
       const billId = recordId(body.billId, "Bill");
       const period = text(body.period, "Month", { min: 7, max: 7 });
-      await transaction(async (tx) => {
+      const removed = await transaction(async (tx) => {
         const row = await tx.one<BillPaymentRow>("SELECT * FROM bill_payments WHERE villa_id = ? AND bill_id = ? AND period = ? FOR UPDATE", [villaId, billId, period]);
         if (!row) throw notFound("Bill payment");
+        const stored = row.expense_id ? await tx.one<{ receipt_key: string | null }>("SELECT receipt_key FROM expenses WHERE villa_id = ? AND id = ?", [villaId, row.expense_id]) : undefined;
         if (row.expense_id) await tx.run("DELETE FROM expenses WHERE villa_id = ? AND id = ?", [villaId, row.expense_id]);
         await tx.run("DELETE FROM bill_payments WHERE villa_id = ? AND bill_id = ? AND period = ?", [villaId, billId, period]);
+        return stored?.receipt_key ?? null;
       });
+      await deleteStored(removed);
       return;
     }
 

@@ -112,6 +112,10 @@ export interface Expense {
   date: string;
   note?: string;
   receiptName?: string;
+  /** Set when choosing a file: where it was uploaded. Never sent back to the browser. */
+  receiptKey?: string;
+  /** The receipt file is stored and can be opened (/api/villa/receipts/<id>) */
+  hasReceipt?: boolean;
 }
 
 export const PAY_TYPES = ["monthly", "daily"] as const;

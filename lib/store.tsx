@@ -55,6 +55,8 @@ interface Store extends AppData {
   /** The "Start your subscription" popup */
   subscribeOpen: boolean;
   setSubscribeOpen: (open: boolean) => void;
+  /** "Look around first" before subscribing: closes the popup and lets the first-time guide show */
+  lookAround: () => void;
   /** A new owner's first visit: show the guide */
   tourPending: boolean;
   /** The guide was finished or skipped; it won't show again */
@@ -111,7 +113,7 @@ interface Store extends AppData {
   /** Removes the bill and its payment records. The expenses it became stay. */
   removeBill: (id: string) => void;
   /** Marks one due date paid and adds it to Expenses. */
-  payBill: (billId: string, period: string, paidOn: string, amount: number) => void;
+  payBill: (billId: string, period: string, paidOn: string, amount: number, receipt?: { key: string; name: string } | null) => void;
   /** Marks one due date as dealt with, without an expense. */
   skipBill: (billId: string, period: string) => void;
   /** Undoes a payment or skip; a paid one's expense is removed too. */
@@ -179,6 +181,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [serverTour, setServerTour] = useState(false);
   const [tourDone, setTourDone] = useState(false);
+  // Before paying, the guide waits until the owner chooses to look around.
+  const [lookingAround, setLookingAround] = useState(false);
   const [openBookingId, setOpenBookingId] = useState<string | null>(null);
   const [checkoutIntent, setCheckoutIntent] = useState(false);
   const openBooking = useCallback((id: string | null) => {
@@ -325,8 +329,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       awaitingPayment: access === "ok" ? awaitingPayment : null,
       subscribeOpen: access === "ok" && !!awaitingPayment && subscribeOpen,
       setSubscribeOpen,
+      lookAround() {
+        setLookingAround(true);
+        setSubscribeOpen(false);
+      },
       // The guide waits until they have subscribed and can actually use it.
-      tourPending: access === "ok" && serverTour && !tourDone && !awaitingPayment,
+      tourPending: access === "ok" && serverTour && !tourDone && (!awaitingPayment || (lookingAround && !subscribeOpen)),
       finishTour() {
         setTourDone(true);
         void api("/api/villa/tour", {});
@@ -424,7 +432,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       addExpense(expense) {
         if (paused()) return;
-        const created = { ...expense, id: uid("e") };
+        const created = { ...expense, id: uid("e"), hasReceipt: !!expense.receiptKey };
         patch((s) => ({ ...s, expenses: [created, ...s.expenses] }));
         send({ type: "addExpense", expense: created });
       },
@@ -536,7 +544,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         patch((s) => ({ ...s, bills: s.bills.filter((b) => b.id !== id), billPayments: s.billPayments.filter((p) => p.billId !== id) }));
         send({ type: "deleteBill", id });
       },
-      payBill(billId, period, paidOn, amount) {
+      payBill(billId, period, paidOn, amount, receipt) {
         if (paused()) return;
         const bill = d.bills.find((b) => b.id === billId);
         if (!bill || d.billPayments.some((p) => p.billId === billId && p.period === period)) return;
@@ -544,9 +552,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         patch((s) => ({
           ...s,
           billPayments: [{ billId, period, paidOn, amount, expenseId, skipped: false }, ...s.billPayments],
-          expenses: [{ id: expenseId, date: paidOn, amount, ...billExpense(bill, period) }, ...s.expenses],
+          expenses: [{ id: expenseId, date: paidOn, amount, ...billExpense(bill, period), receiptName: receipt?.name, hasReceipt: !!receipt }, ...s.expenses],
         }));
-        send({ type: "payBill", billId, period, paidOn, amount, expenseId });
+        send({ type: "payBill", billId, period, paidOn, amount, expenseId, receiptKey: receipt?.key, receiptName: receipt?.name });
       },
       skipBill(billId, period) {
         if (paused()) return;
@@ -581,7 +589,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toast,
       notify,
     };
-  }, [data, subscription, today, access, support, renewal, awaitingPayment, subscribeOpen, unverifiedEmail, serverTour, tourDone, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
+  }, [data, subscription, today, access, support, renewal, awaitingPayment, subscribeOpen, lookingAround, unverifiedEmail, serverTour, tourDone, accessError, reload, send, patch, patchBooking, openBookingId, openBooking, openCheckout, checkoutIntent, openGuestId, expenseFormOpen, guestFormOpen, draft, toast, notify]);
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }

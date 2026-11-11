@@ -1,7 +1,6 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CircleCheck, LinkIcon } from "lucide-react";
 import { AuthPanel } from "@/components/auth-panel";
@@ -48,9 +47,9 @@ function Verify() {
         <CircleCheck className="size-10 text-sage" aria-hidden />
         <h1 className="mt-4 text-2xl font-semibold">Email confirmed</h1>
         <p className="mt-2 text-muted">Thank you. Your account is ready. Carry on to your dashboard.</p>
-        <Link href="/dashboard" className="mt-6 flex min-h-12 items-center justify-center rounded-xl bg-ink px-5 font-semibold text-white">
+        <a href="/dashboard" className="mt-6 flex min-h-12 items-center justify-center rounded-xl bg-ink px-5 font-semibold text-white">
           Continue
-        </Link>
+        </a>
       </AuthPanel>
     );
   }
@@ -60,9 +59,9 @@ function Verify() {
       <LinkIcon className="size-10 text-clay" aria-hidden />
       <h1 className="mt-4 text-2xl font-semibold">This link no longer works</h1>
       <p className="mt-2 text-muted">{message ?? "The link is incomplete."} Links work for 24 hours, and only the newest one works.</p>
-      <Link href="/dashboard" className="mt-6 flex min-h-12 items-center justify-center rounded-xl bg-ink px-5 font-semibold text-white">
+      <a href="/dashboard" className="mt-6 flex min-h-12 items-center justify-center rounded-xl bg-ink px-5 font-semibold text-white">
         Sign in to get a new link
-      </Link>
+      </a>
     </AuthPanel>
   );
 }

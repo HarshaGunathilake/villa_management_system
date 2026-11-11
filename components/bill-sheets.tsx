@@ -10,6 +10,7 @@ import { addMonths, fmtFull, fmtMonthLong, fmtMonthShort, monthKey } from "@/lib
 import { useStore } from "@/lib/store";
 import { BILL_REPEATS, EXPENSE_CATEGORIES, type Bill, type BillRepeat, type ExpenseCategory } from "@/lib/types";
 import { cn, money } from "@/lib/utils";
+import { ReceiptPicker, type Receipt } from "@/components/receipt-picker";
 
 const selectClass =
   "min-h-12 w-full rounded-xl border border-line-strong bg-card px-4 text-base focus:border-brass-deep focus:ring-2 focus:ring-brass/25 focus:outline-none";
@@ -230,6 +231,8 @@ function PayBillForm({ due, onClose }: { due: BillDue; onClose: () => void }) {
   const { payBill, skipBill, today, notify, readOnly } = useStore();
   const [amount, setAmount] = useState(due.bill.amount);
   const [paidOn, setPaidOn] = useState(today);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -241,13 +244,14 @@ function PayBillForm({ due, onClose }: { due: BillDue; onClose: () => void }) {
       <Field label="Amount paid">{(id) => <MoneyInput id={id} value={amount} onChange={setAmount} />}</Field>
       <Field label="Paid on">{(id) => <Input id={id} type="date" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} />}</Field>
       {due.bill.note ? <p className="rounded-xl bg-well px-4 py-3 text-[0.9375rem] whitespace-pre-wrap">{due.bill.note}</p> : null}
+      <ReceiptPicker value={receipt} onChange={setReceipt} onBusy={setUploading} label="Attach the bill or receipt" />
 
       <Button
         size="lg"
         block
-        disabled={readOnly || amount <= 0 || !paidOn}
+        disabled={readOnly || amount <= 0 || !paidOn || uploading}
         onClick={() => {
-          payBill(due.bill.id, due.period, paidOn, amount);
+          payBill(due.bill.id, due.period, paidOn, amount, receipt);
           notify(`${due.bill.name} paid and added to expenses`);
           onClose();
         }}

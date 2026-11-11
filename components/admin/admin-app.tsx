@@ -57,7 +57,14 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (access === "signed_out" && !onLogin) router.replace("/admin/login");
-    if (access === "ok" && onLogin) router.replace("/admin");
+    if (access === "ok" && onLogin) {
+      router.replace("/admin");
+      // If the in-page switch doesn't happen (seen through tunnels such as ngrok), load the console the ordinary way.
+      const fallback = setTimeout(() => {
+        if (window.location.pathname === "/admin/login") window.location.replace("/admin");
+      }, 2000);
+      return () => clearTimeout(fallback);
+    }
   }, [access, onLogin, router]);
 
   const toastEl = (
@@ -72,7 +79,20 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
 
   if (access === "error") return <ServerUnavailable message={error} onRetry={() => void refresh()} />;
   // The form is in the page from the first byte; only an already signed-in admin is sent on to the console.
-  if (onLogin) return <>{access === "ok" ? null : children}{toastEl}</>;
+  if (onLogin) {
+    return (
+      <>
+        {access === "ok" ? (
+          <div className="grid min-h-dvh place-items-center px-5 text-lg text-muted" role="status" aria-live="polite">
+            Opening the console…
+          </div>
+        ) : (
+          children
+        )}
+        {toastEl}
+      </>
+    );
+  }
   if (access !== "ok" || !data) {
     return (
       <div className="mx-auto max-w-5xl space-y-4 px-4 pt-10" aria-busy="true" aria-label="Loading">

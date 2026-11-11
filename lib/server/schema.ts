@@ -319,6 +319,8 @@ const ADDED_COLUMNS: [table: string, column: string, ddl: string][] = [
   ["villas", "free_until", "DATE NULL"],
   // The card subscription is set to end at the end of the paid month (by the owner in Dodo, or the Super Admin).
   ["villas", "cancel_at_period_end", "TINYINT(1) NOT NULL DEFAULT 0"],
+  // Where the uploaded receipt is kept in the DigitalOcean Space (Bills/<villa>/...); receipt_name is the original file name.
+  ["expenses", "receipt_key", "VARCHAR(400) NULL"],
 ];
 
 const ADDED_INDEXES: [table: string, name: string, ddl: string][] = [

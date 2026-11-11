@@ -32,7 +32,7 @@ function useStartSubscription() {
 }
 
 export function SubscribeDialog() {
-  const { awaitingPayment, subscribeOpen, setSubscribeOpen, support, subscription, signOut, villa, today } = useStore();
+  const { awaitingPayment, subscribeOpen, setSubscribeOpen, lookAround, support, subscription, signOut, villa, today } = useStore();
   const { busy, error, start } = useStartSubscription();
   if (!awaitingPayment) return null;
   const price = money(awaitingPayment.monthlyAmount);
@@ -43,7 +43,7 @@ export function SubscribeDialog() {
   const contact = help?.email ? `mailto:${help.email}?subject=${encodeURIComponent("Villa subscription")}` : help?.phone ? `tel:${help.phone.replace(/\s/g, "")}` : null;
 
   return (
-    <Dialog.Root open={subscribeOpen} onOpenChange={setSubscribeOpen}>
+    <Dialog.Root open={subscribeOpen} onOpenChange={(open) => (open ? setSubscribeOpen(true) : lookAround())}>
       <Dialog.Portal>
         <Dialog.Overlay className="anim-fade fixed inset-0 z-[70] bg-ink/45" />
         <Dialog.Content className="anim-fade fixed top-1/2 left-1/2 z-[80] max-h-[92dvh] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl bg-sand p-6 shadow-float outline-none sm:p-8">
@@ -110,7 +110,7 @@ export function SubscribeDialog() {
                 Contact us
               </a>
             ) : null}
-            <Button variant="secondary" size="lg" onClick={() => setSubscribeOpen(false)}>
+            <Button variant="secondary" size="lg" onClick={lookAround}>
               Look around first
             </Button>
           </div>
