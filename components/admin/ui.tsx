@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { AlertTriangle, Ban, CheckCircle2, Clock3, CreditCard, Search } from "lucide-react";
+import { AlertTriangle, Ban, CalendarClock, CheckCircle2, Clock3, CreditCard, Gift, Search, Sparkles } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BADGE_LABEL, SUBSCRIPTION_LABEL, type AccountStatus, type SubscriptionStatus, type VillaBadge } from "@/lib/admin-types";
@@ -52,6 +52,33 @@ const CARD: Record<string, { label: string; tone: Tone }> = {
 export function CardBadge({ status }: { status: string | null }) {
   const c = (status && CARD[status]) || { label: "Not paying by card yet", tone: "stone" as Tone };
   return <Badge tone={c.tone} icon={CreditCard}>{c.label}</Badge>;
+}
+
+/** A villa using its free trial: card saved, first charge on this date. */
+export function TrialBadge({ until }: { until: string }) {
+  return (
+    <Badge tone="dusk" icon={Gift}>
+      Free trial to {fmtFull(until)}
+    </Badge>
+  );
+}
+
+/** Free access you gave, without a card. */
+export function FreeBadge({ until }: { until: string }) {
+  return (
+    <Badge tone="sage" icon={Sparkles}>
+      Free access to {fmtFull(until)}
+    </Badge>
+  );
+}
+
+/** Cancelled at the end of the paid month: no more charges. */
+export function EndingBadge({ on }: { on: string }) {
+  return (
+    <Badge tone="amber" icon={CalendarClock}>
+      Ends {fmtFull(on)}
+    </Badge>
+  );
 }
 
 /** "in 6 days", "today", "4 days ago" */

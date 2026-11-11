@@ -14,8 +14,12 @@ import {
   SearchInput,
   StatTile,
   TabBar,
+  EndingBadge,
+  FreeBadge,
+  TrialBadge,
   VillaStatusBadge,
 } from "@/components/admin/ui";
+import { SubscriptionActions, SubscriptionNote } from "@/components/admin/subscription-actions";
 import { Button } from "@/components/ui/button";
 import { useAdmin, useAdminData } from "@/lib/admin-store";
 import { BADGE_LABEL, villaBadge, type AdminUser, type AdminVilla, type SubscriptionPayment } from "@/lib/admin-types";
@@ -27,7 +31,7 @@ import { cn, money } from "@/lib/utils";
  * when it is charged next and what it has paid. Payments have their own page.
  */
 
-type Filter = "all" | "paying" | "awaiting" | "trouble" | "due" | "ended" | "off";
+type Filter = "all" | "paying" | "trial" | "free" | "awaiting" | "trouble" | "due" | "ended" | "off";
 type Sort = "next" | "name" | "paid" | "newest";
 
 const TROUBLE = ["on_hold", "past_due"];
@@ -35,8 +39,9 @@ const TROUBLE = ["on_hold", "past_due"];
 function filterOf(v: AdminVilla): Exclude<Filter, "all"> | null {
   if (v.accountStatus === "disabled") return v.disabledReason === "unpaid" ? "awaiting" : v.disabledReason === "subscription" ? "ended" : "off";
   if (v.card.status && TROUBLE.includes(v.card.status)) return "trouble";
+  if (v.freeUntil) return "free";
   if (v.subscriptionStatus !== "active") return "due";
-  if (v.card.status === "active") return "paying";
+  if (v.card.status === "active") return v.trialEndsOn ? "trial" : "paying";
   return null;
 }
 
@@ -82,7 +87,8 @@ export default function SubscriptionsPage() {
   });
 
   // Figures for the tiles
-  const paying = villas.filter((v) => v.card.status === "active" && v.accountStatus === "active");
+  const paying = villas.filter((v) => v.card.status === "active" && v.accountStatus === "active" && !v.trialEndsOn);
+  const trials = villas.filter((v) => filterOf(v) === "trial").length;
 
   const markDue = async (v: AdminVilla) => {
     const result = await act({ type: "setSubscriptionStatus", id: v.id, status: "payment_due" });
@@ -126,7 +132,7 @@ export default function SubscriptionsPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatTile label="Monthly income" value={money(paying.reduce((s, v) => s + v.monthlyAmount, 0))} note={`${paying.length} paying by card`} />
+        <StatTile label="Monthly income" value={money(paying.reduce((s, v) => s + v.monthlyAmount, 0))} note={trials > 0 ? `${paying.length} paying by card, ${trials} on a free trial` : `${paying.length} paying by card`} />
         <StatTile label="Awaiting first payment" value={villas.filter((v) => filterOf(v) === "awaiting").length} note="Signed up, not paid yet" />
         <StatTile label="Ended or switched off" value={villas.filter((v) => filterOf(v) === "ended" || filterOf(v) === "off").length} note="Not being charged" />
         <StatTile
@@ -159,6 +165,8 @@ export default function SubscriptionsPage() {
         tabs={[
           { id: "all", label: "All", count: count("all") },
           { id: "paying", label: "Paying", count: count("paying") },
+          { id: "trial", label: "Free trial", count: count("trial") },
+          { id: "free", label: "Free access", count: count("free") },
           { id: "trouble", label: "Card problems", count: count("trouble") },
           { id: "due", label: "Payment due", count: count("due") },
           { id: "awaiting", label: "Awaiting first payment", count: count("awaiting") },
@@ -201,9 +209,12 @@ export default function SubscriptionsPage() {
                     <span className="flex flex-wrap gap-1.5">
                       <VillaStatusBadge status={villaBadge(r.villa)} />
                       <CardBadge status={r.villa.card.status} />
+                      {r.villa.trialEndsOn ? <TrialBadge until={r.villa.trialEndsOn} /> : null}
+                      {r.villa.freeUntil ? <FreeBadge until={r.villa.freeUntil} /> : null}
+                      {r.villa.cancelAtPeriodEnd ? <EndingBadge on={r.villa.nextPaymentDate} /> : null}
                     </span>
                     <span>
-                      <span className="text-sm text-muted lg:hidden">Next charge: </span>
+                      <span className="text-sm text-muted lg:hidden">{r.villa.trialEndsOn ? "First charge: " : "Next charge: "}</span>
                       {charging ? (
                         <>
                           <span className="tnum font-medium">{fmtDate(r.villa.nextPaymentDate)}</span>
@@ -282,6 +293,13 @@ export default function SubscriptionsPage() {
                           <Button variant="secondary" size="sm" disabled={r.villa.subscriptionStatus !== "active" || r.villa.accountStatus !== "active"} onClick={() => markDue(r.villa)}>
                             Mark payment due
                           </Button>
+                        </div>
+                        <div className="mt-4 space-y-3 border-t border-line pt-4">
+                          <h3 className="font-semibold">Subscription</h3>
+                          <SubscriptionNote villa={r.villa} />
+                          <div className="flex flex-wrap gap-2">
+                            <SubscriptionActions villa={r.villa} />
+                          </div>
                         </div>
                       </div>
                     </div>

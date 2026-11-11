@@ -105,7 +105,8 @@ function Frame({ children }: { children: React.ReactNode }) {
   if (onLogin) {
     return (
       <>
-        {ready && !signedIn ? children : null}
+        {/* Shown straight away (also in the server's HTML); a signed-in owner is sent on to the dashboard. */}
+        {signedIn ? null : children}
         <Toast message={toast} />
       </>
     );

@@ -78,6 +78,10 @@ export const dodo = {
   /** Ends the subscription now: no further charges. */
   cancel: (subscriptionId: string) => call<DodoSubscription>("PATCH", `/subscriptions/${encodeURIComponent(subscriptionId)}`, { status: "cancelled" }),
 
+  /** Ends (true) or keeps (false) the subscription at the end of the paid period. */
+  cancelAtPeriodEnd: (subscriptionId: string, cancel: boolean) =>
+    call<DodoSubscription>("PATCH", `/subscriptions/${encodeURIComponent(subscriptionId)}`, { cancel_at_next_billing_date: cancel }),
+
   /** The new price applies from the next billing date; nothing is charged now. */
   changePlan: (subscriptionId: string, productId: string) =>
     call("POST", `/subscriptions/${encodeURIComponent(subscriptionId)}/change-plan`, {

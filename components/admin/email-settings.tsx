@@ -22,6 +22,7 @@ const SECURITY: { id: SmtpSecurity; label: string; port: number; hint: string }[
 
 const OWNER_EMAILS: { key: keyof MailSettings["emails"]; label: string; hint: string }[] = [
   { key: "welcome", label: "Welcome", hint: "When a villa owner signs up, or you add a villa." },
+  { key: "trial", label: "Free trial", hint: "When the card is added and the free trial starts, and 3 days before the first charge." },
   { key: "paymentReceived", label: "Payment received", hint: "Each time a card payment goes through, with the paid-until date." },
   { key: "paymentFailed", label: "Payment failed", hint: "When a renewal is declined and Dodo starts retrying." },
   { key: "subscriptionEnded", label: "Subscription ended", hint: "When the subscription is cancelled or expires and the villa becomes read-only." },
@@ -36,6 +37,8 @@ export const EMAIL_KIND_LABEL: Record<EmailKind, string> = {
   payment_received: "Payment received",
   payment_failed: "Payment failed",
   subscription_ended: "Subscription ended",
+  trial_started: "Free trial started",
+  trial_ending: "Free trial ending",
   monthly_report: "Monthly report",
 };
 

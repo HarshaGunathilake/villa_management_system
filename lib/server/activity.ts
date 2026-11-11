@@ -8,7 +8,7 @@ import { isoDate } from "./http";
 const TYPE_SQL: Record<ActivityType, string> = {
   villas: "a.action IN ('villa_created','villa_updated','villa_enabled','villa_disabled','villa_signed_up')",
   payments: "a.action LIKE 'dodo\\_%'",
-  subscriptions: "a.action IN ('subscription_updated','price_changed')",
+  subscriptions: "a.action IN ('subscription_updated','price_changed','trial_changed','free_access_ended')",
   logins: "(a.action LIKE 'admin\\_%' OR a.action LIKE 'password\\_%')",
   settings: "a.action = 'settings_updated'",
 };

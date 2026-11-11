@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { CalendarDays, CreditCard, Loader2, Lock, ReceiptText, Users, X } from "lucide-react";
+import { CalendarDays, CreditCard, Gift, Loader2, Lock, ReceiptText, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { goToPayments } from "@/lib/billing-client";
+import { addDays, fmtFull } from "@/lib/dates";
 import { useStore } from "@/lib/store";
 import { money } from "@/lib/utils";
 
@@ -31,10 +32,13 @@ function useStartSubscription() {
 }
 
 export function SubscribeDialog() {
-  const { awaitingPayment, subscribeOpen, setSubscribeOpen, support, subscription, signOut, villa } = useStore();
+  const { awaitingPayment, subscribeOpen, setSubscribeOpen, support, subscription, signOut, villa, today } = useStore();
   const { busy, error, start } = useStartSubscription();
   if (!awaitingPayment) return null;
   const price = money(awaitingPayment.monthlyAmount);
+  const trial = awaitingPayment.trialDays ?? 0;
+  // Dodo charges first on the day the trial ends.
+  const firstCharge = trial > 0 && today ? fmtFull(addDays(today, trial)) : null;
   const help = support ?? subscription?.support ?? null;
   const contact = help?.email ? `mailto:${help.email}?subject=${encodeURIComponent("Villa subscription")}` : help?.phone ? `tel:${help.phone.replace(/\s/g, "")}` : null;
 
@@ -47,11 +51,12 @@ export function SubscribeDialog() {
             <X className="size-5" />
           </Dialog.Close>
           <span className="grid size-14 place-items-center rounded-full bg-brass-soft text-brass-deep">
-            <CreditCard className="size-7" aria-hidden />
+            {trial > 0 ? <Gift className="size-7" aria-hidden /> : <CreditCard className="size-7" aria-hidden />}
           </span>
-          <Dialog.Title className="mt-5 text-[1.625rem] leading-tight font-semibold">Start your subscription</Dialog.Title>
+          <Dialog.Title className="mt-5 text-[1.625rem] leading-tight font-semibold">{trial > 0 ? `Start your ${trial}-day free trial` : "Start your subscription"}</Dialog.Title>
           <Dialog.Description className="mt-2 text-lg text-muted">
-            {villa.name ? `${villa.name} is set up.` : "Your villa is set up."} Subscribe to start taking bookings. You can look around first.
+            {villa.name ? `${villa.name} is set up.` : "Your villa is set up."}{" "}
+            {trial > 0 ? "Add your card to start taking bookings. You can look around first." : "Subscribe to start taking bookings. You can look around first."}
           </Dialog.Description>
 
           <ul className="mt-5 space-y-2.5">
@@ -68,12 +73,23 @@ export function SubscribeDialog() {
           </ul>
 
           {awaitingPayment.canPay ? (
-            <div className="mt-6 rounded-card border border-line bg-card p-4">
-              <div className="tnum text-2xl font-semibold">
-                {price} <span className="text-base font-normal text-muted">a month</span>
+            trial > 0 ? (
+              <div className="mt-6 rounded-card border border-line bg-card p-4">
+                <div className="text-2xl font-semibold">
+                  Free for {trial} {trial === 1 ? "day" : "days"}
+                </div>
+                <p className="tnum mt-0.5 text-[0.9375rem] text-muted">
+                  Nothing is charged today. Then {price} a month{firstCharge ? `, from ${firstCharge}` : ""}. Cancel before then and you pay nothing.
+                </p>
               </div>
-              <p className="mt-0.5 text-sm text-muted">Paid by card every month. Cancel any time.</p>
-            </div>
+            ) : (
+              <div className="mt-6 rounded-card border border-line bg-card p-4">
+                <div className="tnum text-2xl font-semibold">
+                  {price} <span className="text-base font-normal text-muted">a month</span>
+                </div>
+                <p className="mt-0.5 text-sm text-muted">Paid by card every month. Cancel any time.</p>
+              </div>
+            )
           ) : (
             <p className="mt-6 rounded-card bg-well p-4 text-[0.9375rem]">Card payments are not available right now. Please contact us to start your subscription.</p>
           )}
@@ -87,7 +103,7 @@ export function SubscribeDialog() {
           <div className="mt-6 grid gap-3">
             {awaitingPayment.canPay ? (
               <Button size="lg" onClick={start} disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <CreditCard />} Subscribe for {price} a month
+                {busy ? <Loader2 className="animate-spin" /> : <CreditCard />} {trial > 0 ? "Add card and start free trial" : `Subscribe for ${price} a month`}
               </Button>
             ) : contact ? (
               <a href={contact} className="inline-flex min-h-14 items-center justify-center rounded-xl bg-ink px-6 text-[1.0625rem] font-semibold text-white hover:opacity-90">
@@ -113,15 +129,20 @@ export function SubscribeDialog() {
 export function SubscribeBanner() {
   const { awaitingPayment, setSubscribeOpen } = useStore();
   if (!awaitingPayment) return null;
+  const trial = awaitingPayment.trialDays ?? 0;
   return (
     <div role="status" className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-card bg-brass-soft px-5 py-4 text-brass-deep">
       <Lock className="size-5 shrink-0" aria-hidden />
       <div className="min-w-0 flex-1 basis-64">
-        <p className="font-semibold">Subscribe to start using your villa</p>
-        <p className="text-[0.9375rem]">You can look around. Bookings and other changes start working once you subscribe.</p>
+        <p className="font-semibold">{trial > 0 ? `Start your ${trial}-day free trial to use your villa` : "Subscribe to start using your villa"}</p>
+        <p className="text-[0.9375rem]">
+          {trial > 0
+            ? "You can look around. Add your card and bookings and other changes start working. Nothing is charged until the trial ends."
+            : "You can look around. Bookings and other changes start working once you subscribe."}
+        </p>
       </div>
       <Button onClick={() => setSubscribeOpen(true)} className="shrink-0">
-        <CreditCard /> Subscribe, {money(awaitingPayment.monthlyAmount)} a month
+        {trial > 0 ? <Gift /> : <CreditCard />} {trial > 0 ? "Start free trial" : `Subscribe, ${money(awaitingPayment.monthlyAmount)} a month`}
       </Button>
     </div>
   );

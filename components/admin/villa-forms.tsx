@@ -10,6 +10,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { useAdmin, useAdminData } from "@/lib/admin-store";
 import type { AdminUser, AdminVilla } from "@/lib/admin-types";
 import { shiftMonths } from "@/lib/admin-logic";
+import { addDays, fmtFull } from "@/lib/dates";
 import { money } from "@/lib/utils";
 
 const plusMonth = (iso: string) => shiftMonths(iso, 1);
@@ -31,6 +32,11 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
   const [villa, setVilla] = useState({ name: "", location: "", phone: "", email: "", address: "", description: "" });
   const [startDate, setStartDate] = useState(today);
   const [nextPaymentDate, setNextPaymentDate] = useState(plusMonth(today));
+  // A free trial: free access from the start date for this many days, then the owner pays by card.
+  const [trial, setTrial] = useState(settings.trialDays > 0);
+  const [trialDays, setTrialDays] = useState(settings.trialDays > 0 ? settings.trialDays : 30);
+  const trialOk = Number.isInteger(trialDays) && trialDays >= 1 && trialDays <= 365;
+  const firstCharge = trial && trialOk && startDate ? addDays(startDate, trialDays) : null;
   const [admin, setAdmin] = useState({ name: "", email: "", phone: "", password: "", confirm: "" });
   const [activate, setActivate] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +52,7 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
     : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(admin.email.trim()) ? "Enter the admin's email."
     : admin.password.length < 8 ? "The password needs at least 8 characters."
     : admin.password !== admin.confirm ? "The two passwords do not match."
+    : trial && !trialOk ? "The free trial must be between 1 and 365 days."
     : null;
 
   const submit = async (e: React.FormEvent) => {
@@ -55,7 +62,7 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
     const result = await act<{ villaId: string }>({
       type: "createVilla",
       villa,
-      subscription: { startDate, nextPaymentDate },
+      subscription: trial ? { startDate, trialDays } : { startDate, nextPaymentDate },
       admin: { name: admin.name, email: admin.email, phone: admin.phone, password: admin.password },
       activate,
     });
@@ -113,13 +120,51 @@ function CreateVillaForm({ onClose }: { onClose: () => void }) {
           <span className="text-muted">Monthly price</span>
           <span className="tnum font-semibold">{money(settings.defaultMonthlyAmount)}</span>
         </div>
+        <div className="rounded-xl border border-line">
+          <label className="flex cursor-pointer items-start gap-3 px-4 py-3.5">
+            <input type="checkbox" checked={trial} onChange={(e) => setTrial(e.target.checked)} className="mt-0.5 size-6 shrink-0 accent-[#252525]" />
+            <span>
+              <span className="font-medium">Start with a free trial</span>
+              <span className="block text-sm text-muted">The villa can use everything free, with no card. The owner adds a card before the trial ends to carry on.</span>
+            </span>
+          </label>
+          {trial ? (
+            <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3.5">
+              <label htmlFor="trial-days" className="font-medium">
+                Free for
+              </label>
+              <Input
+                id="trial-days"
+                inputMode="numeric"
+                className="tnum w-24"
+                value={Number.isNaN(trialDays) ? "" : String(trialDays)}
+                onChange={(e) => {
+                  const d = e.target.value.replace(/[^0-9]/g, "");
+                  setTrialDays(d === "" ? Number.NaN : Math.min(365, Number(d)));
+                }}
+              />
+              <span className="text-muted">days</span>
+            </div>
+          ) : null}
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Subscription start date">
             {(id) => <Input id={id} type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); if (e.target.value) setNextPaymentDate(plusMonth(e.target.value)); }} />}
           </Field>
-          <Field label="Next payment due">{(id) => <Input id={id} type="date" value={nextPaymentDate} min={startDate} onChange={(e) => setNextPaymentDate(e.target.value)} />}</Field>
+          {trial ? (
+            <div>
+              <div className="mb-2 font-medium">First payment due</div>
+              <div className="flex min-h-[3.25rem] items-center rounded-xl bg-well px-4 tnum">{firstCharge ? fmtFull(firstCharge) : "Enter the trial length"}</div>
+            </div>
+          ) : (
+            <Field label="Next payment due">{(id) => <Input id={id} type="date" value={nextPaymentDate} min={startDate} onChange={(e) => setNextPaymentDate(e.target.value)} />}</Field>
+          )}
         </div>
-        <p className="text-sm text-muted">Every villa pays the same price, set in Settings. The villa admin pays by card from their Subscription page, and payments are recorded by themselves.</p>
+        <p className="text-sm text-muted">
+          {trial && firstCharge
+            ? `Free until ${fmtFull(addDays(firstCharge, -1))}. If the owner adds their card before then, the first ${money(settings.defaultMonthlyAmount)} charge is on ${fmtFull(firstCharge)}; if not, the villa switches off after the trial. Nothing is deleted.`
+            : "Every villa pays the same price, set in Settings. The villa admin pays by card from their Subscription page, and payments are recorded by themselves."}
+        </p>
       </section>
 
       <section className="space-y-4">

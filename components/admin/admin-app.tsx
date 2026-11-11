@@ -71,7 +71,8 @@ function AdminFrame({ children }: { children: React.ReactNode }) {
   );
 
   if (access === "error") return <ServerUnavailable message={error} onRetry={() => void refresh()} />;
-  if (onLogin) return <>{access === "signed_out" ? children : null}{toastEl}</>;
+  // The form is in the page from the first byte; only an already signed-in admin is sent on to the console.
+  if (onLogin) return <>{access === "ok" ? null : children}{toastEl}</>;
   if (access !== "ok" || !data) {
     return (
       <div className="mx-auto max-w-5xl space-y-4 px-4 pt-10" aria-busy="true" aria-label="Loading">

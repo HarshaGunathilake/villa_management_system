@@ -243,4 +243,12 @@ export interface VillaSubscription {
   billing: VillaBilling;
   /** Who to contact about payments */
   support: { email: string; phone: string };
+  /** Using the free trial until this date, when the card is first charged; null otherwise */
+  trialEndsOn: string | null;
+  /** Free days the first checkout would give (a new sign-up that has not added a card yet); 0 = none */
+  trialOffer: number;
+  /** Free access given by the platform, without a card: the last free day */
+  freeUntil: string | null;
+  /** The card subscription is cancelled and ends at the end of the paid period (nextPaymentDate) */
+  endsAtPeriodEnd: boolean;
 }

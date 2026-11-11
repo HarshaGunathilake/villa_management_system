@@ -87,7 +87,15 @@ export default function SubscriptionPage() {
             </Card>
           )}
           <p className="mt-3 text-sm text-muted">
-            Paid until {fmtFull(addDays(s.nextPaymentDate, -1))}. Each payment covers one month.
+            {s.freeUntil
+              ? `Free access until ${fmtFull(s.freeUntil)}. Each payment after that covers one month.`
+              : s.endsAtPeriodEnd
+                ? `Cancelled. You can use everything until ${fmtFull(addDays(s.nextPaymentDate, -1))}.`
+                : s.trialOffer > 0
+                  ? "Your first payment is at the end of the free trial. Each payment covers one month."
+                  : s.trialEndsOn
+                    ? `Free until ${fmtFull(addDays(s.trialEndsOn, -1))}. The first payment is on ${fmtFull(s.trialEndsOn)}, and each payment covers one month.`
+                    : `Paid until ${fmtFull(addDays(s.nextPaymentDate, -1))}. Each payment covers one month.`}
           </p>
         </section>
       </div>

@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { createSession, hashPassword, verificationRequired } from "./auth";
 import { isoToLocalDate, nowSql } from "./config";
 import { db, transaction } from "./db";
+import { DEFAULT_SETTINGS } from "./seed";
 import { ApiError, email as cleanEmail, password as cleanPassword, text } from "./http";
 
 /*
@@ -19,14 +20,19 @@ import { ApiError, email as cleanEmail, password as cleanPassword, text } from "
 export interface SignupInfo {
   open: boolean;
   monthlyAmount: number;
+  /** Free days before the first card charge; 0 = no trial */
+  trialDays: number;
 }
 
 export async function signupInfo(): Promise<SignupInfo> {
-  const rows = await db.query<{ name: string; value: string }>("SELECT name, value FROM platform_settings WHERE name IN ('signupsOpen','defaultMonthlyAmount','comingSoon')");
+  const rows = await db.query<{ name: string; value: string }>("SELECT name, value FROM platform_settings WHERE name IN ('signupsOpen','defaultMonthlyAmount','comingSoon','trialDays')");
   const get = (name: string) => rows.find((r) => r.name === name)?.value;
   const monthlyAmount = Number(get("defaultMonthlyAmount")) || 0;
   // Open unless the Super Admin closed them or the site is still "coming soon", and only with a price to charge.
-  return { open: get("signupsOpen") !== "false" && get("comingSoon") !== "true" && monthlyAmount > 0, monthlyAmount };
+  // Not set yet: the default from the seed (30 days).
+  const trialRaw = get("trialDays") ?? DEFAULT_SETTINGS.trialDays;
+  const trialDays = Math.max(0, Math.min(365, Math.round(Number(trialRaw) || 0)));
+  return { open: get("signupsOpen") !== "false" && get("comingSoon") !== "true" && monthlyAmount > 0, monthlyAmount, trialDays };
 }
 
 /* A few sign-ups per address per hour, so the form cannot be used to flood the database. */
@@ -75,9 +81,9 @@ export async function register(body: Record<string, unknown>, ip: string, origin
       }
       await tx.run(
         `INSERT INTO villas (id, name, location, phone, email, plan, monthly_subscription_amount, subscription_status, account_status, disabled_reason,
-                             subscription_start_date, next_payment_date, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [villaId, villaName, location, phone, adminEmail, "Standard", info.monthlyAmount, "payment_due", "disabled", "unpaid", today, today, now, now],
+                             subscription_start_date, next_payment_date, created_at, updated_at, trial_days)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [villaId, villaName, location, phone, adminEmail, "Standard", info.monthlyAmount, "payment_due", "disabled", "unpaid", today, today, now, now, info.trialDays],
       );
       await tx.run(
         "INSERT INTO users (id, villa_id, name, email, phone, password_hash, role, status, last_login_at, created_at, updated_at, email_unverified, tour_pending) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)",
@@ -86,7 +92,7 @@ export async function register(body: Record<string, unknown>, ip: string, origin
       await tx.run("INSERT INTO activity_log (villa_id, action, detail, created_by, created_at) VALUES (?,?,?,?,?)", [
         villaId,
         "villa_signed_up",
-        `${villaName} signed up, waiting for the first payment`,
+        info.trialDays > 0 ? `${villaName} signed up, waiting for a card to start the ${info.trialDays}-day free trial` : `${villaName} signed up, waiting for the first payment`,
         userId,
         now,
       ]);

@@ -64,3 +64,6 @@ export function nowSql(offsetMs = 0) {
 export function sqlToIso(value: string | null) {
   return value ? `${value.replace(" ", "T")}Z` : null;
 }
+
+/** The free trial new sign-ups get until the Super Admin changes it (Settings → Subscription). */
+export const DEFAULT_TRIAL_DAYS = 30;

@@ -69,7 +69,7 @@ export async function loadMailSettings(): Promise<MailSettings> {
     hasPassword: Boolean(s.get("smtpPassword")),
     fromName: s.get("mailFromName") ?? "",
     fromEmail: s.get("mailFromEmail") ?? "",
-    emails: { welcome: on("emailWelcome"), paymentReceived: on("emailPaymentReceived"), paymentFailed: on("emailPaymentFailed"), subscriptionEnded: on("emailSubscriptionEnded") },
+    emails: { welcome: on("emailWelcome"), trial: on("emailTrial"), paymentReceived: on("emailPaymentReceived"), paymentFailed: on("emailPaymentFailed"), subscriptionEnded: on("emailSubscriptionEnded") },
   };
 }
 
@@ -97,7 +97,7 @@ export async function saveMailSettings(p: Record<string, unknown>) {
   if (typeof p.password === "string" && p.password !== "") next.smtpPassword = encrypt(p.password);
   if (p.clearPassword === true) next.smtpPassword = "";
   const emails = (p.emails ?? {}) as Record<string, unknown>;
-  for (const [field, name] of [["welcome", "emailWelcome"], ["paymentReceived", "emailPaymentReceived"], ["paymentFailed", "emailPaymentFailed"], ["subscriptionEnded", "emailSubscriptionEnded"]] as const) {
+  for (const [field, name] of [["welcome", "emailWelcome"], ["trial", "emailTrial"], ["paymentReceived", "emailPaymentReceived"], ["paymentFailed", "emailPaymentFailed"], ["subscriptionEnded", "emailSubscriptionEnded"]] as const) {
     if (emails[field] !== undefined) next[name] = emails[field] === true ? "true" : "false";
   }
   for (const [name, value] of Object.entries(next)) {

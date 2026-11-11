@@ -1,13 +1,13 @@
 import type { ActivityEntry, AdminData, AdminUser, AdminVilla, PlatformSettings, SubscriptionPayment } from "../admin-types";
 import { bookingPhase, coversNight, guestCount, isActive } from "../availability";
-import { fromISO, monthKey, toISO } from "../dates";
+import { addDays, fromISO, monthKey, toISO } from "../dates";
 import { monthSummary } from "../finance";
 import type { AppData, Booking, Expense, Room } from "../types";
 import { endSessionsForUser, endSessionsForVilla, hashPassword, type SessionUser } from "./auth";
 import { nowSql, serverToday, sqlToIso } from "./config";
 import { db, transaction, type Db } from "./db";
 import { ApiError, badRequest, email as cleanEmail, integer, isoDate, notFound, oneOf, password as cleanPassword, recordId, text } from "./http";
-import { cancelForDisable, isPaidByCard, repriceSubscription } from "./billing";
+import { adminCancelSubscription, adminKeepSubscription, cancelForDisable, endFreeAccess, grantFreeAccess, isPaidByCard, repriceSubscription } from "./billing";
 import { renameProducts } from "./dodo";
 import { DEFAULT_SETTINGS } from "./seed";
 import { later, queueOwnerEmails, testEmail } from "./emails";
@@ -38,6 +38,7 @@ export async function loadSettings(): Promise<PlatformSettings> {
     supportEmail: get("supportEmail"),
     supportPhone: get("supportPhone"),
     defaultMonthlyAmount: Number(get("defaultMonthlyAmount")) || 0,
+    trialDays: Math.max(0, Math.min(365, Math.round(Number(get("trialDays")) || 0))),
     signupsOpen: get("signupsOpen") !== "false",
     requireEmailVerification: get("requireEmailVerification") !== "false",
     searchIndexing: get("searchIndexing") !== "false",
@@ -53,6 +54,9 @@ interface VillaRow {
   monthly_subscription_amount: number; subscription_status: AdminVilla["subscriptionStatus"]; account_status: AdminVilla["accountStatus"];
   subscription_start_date: string; next_payment_date: string; notes: string | null; created_at: string;
   disabled_reason: string | null; dodo_status: string | null; dodo_subscription_id: string | null; dodo_customer_id: string | null;
+  trial_ends_on: string | null;
+  free_until: string | null;
+  cancel_at_period_end: number;
 }
 
 export async function loadAdminData(me: SessionUser): Promise<AdminData> {
@@ -98,6 +102,9 @@ export async function loadAdminData(me: SessionUser): Promise<AdminData> {
       createdAt: sqlToIso(v.created_at)!,
       disabledReason: v.account_status === "disabled" ? (v.disabled_reason === "subscription" || v.disabled_reason === "unpaid" ? v.disabled_reason : "manual") : null,
       card: { status: v.dodo_status, subscriptionId: v.dodo_subscription_id, customerId: v.dodo_customer_id },
+      trialEndsOn: v.trial_ends_on && v.trial_ends_on > today && v.dodo_status === "active" ? v.trial_ends_on : null,
+      freeUntil: v.free_until,
+      cancelAtPeriodEnd: !!v.cancel_at_period_end && !!v.dodo_status && ["active", "on_hold", "past_due", "paused"].includes(v.dodo_status),
       signedUp: signedUp.has(v.id),
       stats: villaStats(today, rooms, bookings, expenseRows.filter((e) => e.villa_id === v.id)),
     });
@@ -172,7 +179,10 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       const adminEmail = cleanEmail(a.email, "Admin email");
       const adminPassword = cleanPassword(a.password);
       const start = isoDate(s.startDate, "Subscription start date");
-      const nextDue = s.nextPaymentDate ? isoDate(s.nextPaymentDate, "Next payment date") : plusMonth(start);
+      // A free trial: free access (no card) from the start date; the first payment is due the day after.
+      const trialDays = s.trialDays === undefined || s.trialDays === null || s.trialDays === 0 ? 0 : integer(s.trialDays, "Free trial", { min: 1, max: 365 });
+      const freeUntil = trialDays > 0 ? addDays(start, trialDays - 1) : null;
+      const nextDue = freeUntil ? addDays(freeUntil, 1) : s.nextPaymentDate ? isoDate(s.nextPaymentDate, "Next payment date") : plusMonth(start);
       if (nextDue < start) throw badRequest("Next payment date cannot be before the start date.");
       const villaId = newId("v");
       const userId = newId("u");
@@ -184,18 +194,18 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
         await assertEmailFree(tx, adminEmail);
         await tx.run(
           `INSERT INTO villas (id, name, location, phone, email, address, description, plan, monthly_subscription_amount, subscription_status, account_status,
-                               subscription_start_date, next_payment_date, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                               subscription_start_date, next_payment_date, created_at, updated_at, free_until)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           [
             villaId, name, text(v.location, "Location", { max: 160, optional: true }), text(v.phone, "Phone", { max: 40, optional: true }),
             v.email ? cleanEmail(v.email, "Villa email") : "", text(v.address, "Address", { max: 255, optional: true }), text(v.description, "Description", { max: 2000, optional: true }) || null,
-            text(s.plan, "Plan", { max: 40, optional: true }) || "Standard", price, "active", "active", start, nextDue, now, now,
+            text(s.plan, "Plan", { max: 40, optional: true }) || "Standard", price, "active", "active", start, nextDue, now, now, freeUntil,
           ],
         );
         await tx.run("INSERT INTO users (id, villa_id, name, email, phone, password_hash, role, status, created_at, updated_at, tour_pending) VALUES (?,?,?,?,?,?,?,?,?,?,1)", [
           userId, villaId, adminName, adminEmail, text(a.phone, "Admin phone", { max: 40, optional: true }), await hashPassword(adminPassword), "villa_admin", activate ? "active" : "disabled", now, now,
         ]);
-        await logActivity(tx, me, villaId, "villa_created", `${name} created`);
+        await logActivity(tx, me, villaId, "villa_created", `${name} created${trialDays > 0 ? ` with a ${trialDays}-day free trial, free until ${freeUntil}` : ""}`);
         await logActivity(tx, me, villaId, "admin_created", `Admin account created for ${adminName}${activate ? "" : " (not activated yet)"}`);
       });
       if (activate) queueOwnerEmails([{ kind: "welcome", villaId, signedUp: false }]);
@@ -245,7 +255,8 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       // Off by hand: stop the card first, so a failed cancel leaves nothing half done.
       const cancelled = status === "disabled" ? await cancelForDisable(id) : false;
       // Back on: a villa that paid by card but has no live subscription any more has to pay again first.
-      const mustPay = status === "active" && !!v.dodo_customer_id && !(await isPaidByCard(id));
+      const freeNow = !!v.free_until && v.free_until >= serverToday();
+      const mustPay = status === "active" && !!v.dodo_customer_id && !freeNow && !(await isPaidByCard(id));
       await db.run("UPDATE villas SET account_status = ?, disabled_reason = ?, updated_at = ? WHERE id = ?", [
         mustPay ? "disabled" : status, status === "disabled" ? "manual" : mustPay ? "subscription" : null, now, id,
       ]);
@@ -264,6 +275,39 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
       const v = await villaOrThrow(db, id);
       await db.run("UPDATE villas SET subscription_status = ?, updated_at = ? WHERE id = ?", [status, now, id]);
       await logActivity(db, me, id, "subscription_updated", `${v.name} subscription marked as ${status.replace("_", " ")}`);
+      return;
+    }
+
+    case "cancelSubscription": {
+      const id = recordId(body.id, "Villa");
+      const when = oneOf(body.when, ["period_end", "now"] as const, "When");
+      await villaOrThrow(db, id);
+      const detail = await adminCancelSubscription(id, when);
+      await logActivity(db, me, id, "subscription_updated", detail);
+      return;
+    }
+
+    case "keepSubscription": {
+      const id = recordId(body.id, "Villa");
+      await villaOrThrow(db, id);
+      await logActivity(db, me, id, "subscription_updated", await adminKeepSubscription(id));
+      return;
+    }
+
+    case "giveFreeAccess": {
+      const id = recordId(body.id, "Villa");
+      const until = isoDate(body.until, "Free until");
+      await villaOrThrow(db, id);
+      await logActivity(db, me, id, "subscription_updated", await grantFreeAccess(id, until));
+      return;
+    }
+
+    case "endFreeAccess": {
+      const id = recordId(body.id, "Villa");
+      await villaOrThrow(db, id);
+      const detail = await endFreeAccess(id, "ended");
+      if (!detail) throw badRequest("This villa has no free access to end.");
+      await logActivity(db, me, id, "subscription_updated", detail);
       return;
     }
 
@@ -310,6 +354,11 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
         if (price < 1) throw badRequest("The subscription price must be at least LKR 1.");
         next.defaultMonthlyAmount = String(price);
       }
+      if (p.trialDays !== undefined) {
+        const days = integer(p.trialDays, "Free trial");
+        if (days < 0 || days > 365) throw badRequest("The free trial must be between 0 and 365 days.");
+        next.trialDays = String(days);
+      }
       if (p.signupsOpen !== undefined) next.signupsOpen = p.signupsOpen === true ? "true" : "false";
       if (p.requireEmailVerification !== undefined) next.requireEmailVerification = p.requireEmailVerification === true ? "true" : "false";
       if (p.searchIndexing !== undefined) next.searchIndexing = p.searchIndexing === true ? "true" : "false";
@@ -320,6 +369,10 @@ export async function runAdminAction(me: SessionUser, body: Body): Promise<Recor
         await db.run("INSERT INTO platform_settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)", [name, value]);
       }
       await logActivity(db, me, null, "settings_updated", "Platform settings updated");
+      if (next.trialDays !== undefined && Number(next.trialDays) !== before.trialDays) {
+        const days = Number(next.trialDays);
+        await logActivity(db, me, null, "trial_changed", days > 0 ? `Free trial for new sign-ups set to ${days} days` : "Free trial for new sign-ups switched off");
+      }
       // The Dodo checkout shows the platform name in the product; keep it in step.
       if (next.platformName && next.platformName !== before.platformName) {
         const platformName = next.platformName;

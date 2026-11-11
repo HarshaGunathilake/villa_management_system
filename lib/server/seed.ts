@@ -2,7 +2,7 @@ import { addDays } from "../dates";
 import { createSeed, SEED_AMENITIES } from "../seed";
 import type { Booking, Guest, Room } from "../types";
 import { hashPassword } from "./auth";
-import { config, nowSql, serverToday } from "./config";
+import { config, DEFAULT_TRIAL_DAYS, nowSql, serverToday } from "./config";
 import type { Db } from "./db";
 import { insertAmenity, insertBooking, insertExpense, insertGuest, insertRoom } from "./tenant";
 
@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   supportEmail: "support@villaplatform.lk",
   supportPhone: "+94 77 000 1122",
   defaultMonthlyAmount: "5000",
+  trialDays: String(DEFAULT_TRIAL_DAYS),
   signupsOpen: "true",
   requireEmailVerification: "true",
   searchIndexing: "true",

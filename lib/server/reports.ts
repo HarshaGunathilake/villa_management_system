@@ -22,8 +22,8 @@ export async function loadReports(monthsBack = 12): Promise<Reports> {
     db.query<{ villa_id: string | null; action: string; created_at: string }>(
       "SELECT villa_id, action, created_at FROM activity_log WHERE action IN ('villa_signed_up','villa_created','dodo_access_off') ORDER BY created_at",
     ),
-    db.query<{ id: string; account_status: string; disabled_reason: string | null; dodo_status: string | null; monthly_subscription_amount: number }>(
-      "SELECT id, account_status, disabled_reason, dodo_status, monthly_subscription_amount FROM villas",
+    db.query<{ id: string; account_status: string; disabled_reason: string | null; dodo_status: string | null; monthly_subscription_amount: number; trial_ends_on: string | null }>(
+      "SELECT id, account_status, disabled_reason, dodo_status, monthly_subscription_amount, trial_ends_on FROM villas",
     ),
   ]);
 
@@ -56,7 +56,8 @@ export async function loadReports(monthsBack = 12): Promise<Reports> {
     }
   }
 
-  const paying = villas.filter((v) => v.dodo_status === "active" && v.account_status === "active");
+  // A villa on a free trial has a card saved but has not been charged yet.
+  const paying = villas.filter((v) => v.dodo_status === "active" && v.account_status === "active" && !(v.trial_ends_on && v.trial_ends_on > today));
   const allSignups = [...signedUp];
   return {
     today,

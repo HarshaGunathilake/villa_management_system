@@ -3,12 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, Loader2 } from "lucide-react";
-import { BrandMark, Wordmark } from "@/components/brand";
-import { Photo } from "@/components/photo";
+import { AuthShowcase } from "@/components/auth-showcase";
 import { Button } from "@/components/ui/button";
 import { Field, Input, PasswordInput } from "@/components/ui/field";
 import { api } from "@/lib/api";
-import { PHOTOS } from "@/lib/photos";
 import { useStore } from "@/lib/store";
 import { money } from "@/lib/utils";
 import { SITE_URL } from "@/lib/site-url";
@@ -24,7 +22,7 @@ const PRIVACY_URL = process.env.NEXT_PUBLIC_PRIVACY_URL || (SITE_URL ? `${SITE_U
 
 interface Info {
   platformName: string;
-  signup: { open: boolean; monthlyAmount: number };
+  signup: { open: boolean; monthlyAmount: number; trialDays?: number };
 }
 
 const blank = { villaName: "", location: "", ownerName: "", email: "", phone: "", password: "", confirm: "" };
@@ -83,29 +81,16 @@ export default function RegisterPage() {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-      <div className="relative h-56 sm:h-72 lg:h-auto">
-        <Photo src={PHOTOS.villa} alt="A villa seen from its pool" className="absolute inset-0" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-black/10" />
-        <div className="absolute inset-x-0 bottom-0 p-6 text-white sm:p-10 lg:p-14">
-          <div className="flex items-center gap-3">
-            <BrandMark className="size-11" />
-            <div>
-              <Wordmark name={platform} className="block text-2xl leading-tight sm:text-3xl" accentClassName="text-[#bfe3d8]" />
-              <div className="text-white/85">For villa owners and managers</div>
-            </div>
-          </div>
-          <p className="mt-6 hidden max-w-md text-xl leading-snug text-white/90 lg:block">
-            Bookings by the whole villa or by the room, guests, check-in and check-out, invoices and expenses, all in one place.
-          </p>
-        </div>
-      </div>
+      <AuthShowcase platform={platform} tagline="Bookings by the whole villa or by the room, guests, check-in and check-out, invoices and expenses, all in one place." />
 
       <div className="flex items-start justify-center px-5 py-8 sm:px-10 sm:py-12 lg:items-center">
         <form onSubmit={submit} className="w-full max-w-md" noValidate>
           <h1 className="text-[1.875rem] leading-tight font-semibold sm:text-4xl">Create your account</h1>
           {info?.signup.open ? (
             <p className="mt-1 text-lg text-muted">
-              {money(info.signup.monthlyAmount)} a month, paid by card. Cancel any time.
+              {info.signup.trialDays
+                ? `Free for ${info.signup.trialDays} days, then ${money(info.signup.monthlyAmount)} a month by card. Cancel any time.`
+                : `${money(info.signup.monthlyAmount)} a month, paid by card. Cancel any time.`}
             </p>
           ) : (
             <p className="mt-1 text-lg text-muted">Set up your villa in a few minutes.</p>

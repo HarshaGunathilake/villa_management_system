@@ -13,6 +13,8 @@ export interface Renewal {
   canPay: boolean;
   /** The villa signed up itself and has not paid yet (rather than a subscription that ended) */
   firstPayment?: boolean;
+  /** Free days before the first charge, when subscribing now starts a free trial */
+  trialDays?: number;
 }
 
 export type ApiFailure = { ok: false; status: number; code: string; error: string; support?: SupportContact; renewal?: Renewal; email?: string };

@@ -13,9 +13,11 @@ export type OwnerEmail =
   | { kind: "welcome"; villaId: string; signedUp: boolean }
   | { kind: "payment_received"; villaId: string; amount: number; periodEnd: string }
   | { kind: "payment_failed"; villaId: string }
-  | { kind: "subscription_ended"; villaId: string };
+  | { kind: "subscription_ended"; villaId: string }
+  | { kind: "trial_started"; villaId: string; days: number; firstCharge: string; amount: number }
+  | { kind: "trial_ending"; villaId: string; firstCharge: string; amount: number };
 
-const TOGGLE = { welcome: "welcome", payment_received: "paymentReceived", payment_failed: "paymentFailed", subscription_ended: "subscriptionEnded" } as const;
+const TOGGLE = { welcome: "welcome", trial_started: "trial", trial_ending: "trial", payment_received: "paymentReceived", payment_failed: "paymentFailed", subscription_ended: "subscriptionEnded" } as const;
 
 /** Run work after the response; outside a request (scripts, tests) run it straight away. */
 export function later(work: () => Promise<unknown>) {
@@ -35,7 +37,10 @@ const link = (path: string) => (config.appUrl ? `${config.appUrl}${path}` : null
 export async function sendOwnerEmail(e: OwnerEmail) {
   const settings = await loadMailSettings();
   if (!settings.emails[TOGGLE[e.kind]]) return;
-  const villa = await db.one<{ name: string }>("SELECT name FROM villas WHERE id = ?", [e.villaId]);
+  const villa = await db.one<{ name: string; trial_days: number | null; disabled_reason: string | null; free_until: string | null }>(
+    "SELECT name, trial_days, disabled_reason, free_until FROM villas WHERE id = ?",
+    [e.villaId],
+  );
   if (!villa) return;
   const owners = await db.query<{ name: string; email: string }>("SELECT name, email FROM users WHERE villa_id = ? AND role = 'villa_admin' AND status = 'active'", [e.villaId]);
 
@@ -53,13 +58,33 @@ export async function sendOwnerEmail(e: OwnerEmail) {
         switch (e.kind) {
           case "welcome":
             subject = `Welcome to ${platform}`;
-            body = {
-              heading: `Welcome, ${first}`,
-              paragraphs: e.signedUp
-                ? [`Your account for ${villa.name} is ready.`, `To open your villa, make the first monthly payment on the Subscription page. As soon as it goes through, you can add rooms, bookings and expenses.`]
-                : [`An account for ${villa.name} has been set up for you on ${platform}.`, `Sign in with this email address and the password you were given. You can change the password in Settings after you sign in.`],
-              button: e.signedUp ? (billing ? { label: "Make the first payment", url: billing } : undefined) : signIn ? { label: "Sign in", url: signIn } : undefined,
-            };
+            {
+              const trial = e.signedUp && villa.disabled_reason === "unpaid" ? (villa.trial_days ?? 0) : 0;
+              body = {
+                heading: `Welcome, ${first}`,
+                paragraphs: !e.signedUp
+                  ? [
+                      `An account for ${villa.name} has been set up for you on ${platform}.`,
+                      `Sign in with this email address and the password you were given. You can change the password in Settings after you sign in.`,
+                      ...(villa.free_until
+                        ? [`It's free to use until ${longDate(villa.free_until)}. To carry on after that, add your card on the Subscription page any time before then. Nothing is charged until the free period ends.`]
+                        : []),
+                    ]
+                  : trial > 0
+                    ? [
+                        `Your account for ${villa.name} is ready.`,
+                        `Add your card on the Subscription page to start your ${trial}-day free trial. Nothing is charged until the trial ends, and you can cancel any time before then. Once your card is added, you can add rooms, bookings and expenses.`,
+                      ]
+                    : [`Your account for ${villa.name} is ready.`, `To open your villa, make the first monthly payment on the Subscription page. As soon as it goes through, you can add rooms, bookings and expenses.`],
+                button: e.signedUp
+                  ? billing
+                    ? { label: trial > 0 ? "Start my free trial" : "Make the first payment", url: billing }
+                    : undefined
+                  : signIn
+                    ? { label: "Sign in", url: signIn }
+                    : undefined,
+              };
+            }
             break;
           case "payment_received":
             subject = `Payment received: ${money(e.amount)}`;
@@ -78,6 +103,28 @@ export async function sendOwnerEmail(e: OwnerEmail) {
                 `We will try again over the next few days. To avoid any interruption, check your card or add a new one.`,
               ],
               button: billing ? { label: "Update your card", url: billing } : undefined,
+            };
+            break;
+          case "trial_started":
+            subject = `Your ${e.days}-day free trial has started`;
+            body = {
+              heading: "Your free trial has started",
+              paragraphs: [
+                `Your card is saved and ${villa.name} is open. Use everything free until ${longDate(e.firstCharge)}.`,
+                `Nothing has been charged. On ${longDate(e.firstCharge)} your card is charged ${money(e.amount)}, then every month after that. If you don't want to continue, cancel on the Subscription page before then and you won't be charged.`,
+              ],
+              button: billing ? { label: "See your subscription", url: billing } : undefined,
+            };
+            break;
+          case "trial_ending":
+            subject = `Your free trial ends on ${longDate(e.firstCharge)}`;
+            body = {
+              heading: "Your free trial ends soon",
+              paragraphs: [
+                `The free trial for ${villa.name} ends on ${longDate(e.firstCharge)}. That day your card is charged ${money(e.amount)}, and then every month.`,
+                `Nothing to do if you want to carry on. If you don't, cancel on the Subscription page before ${longDate(e.firstCharge)} and you won't be charged.`,
+              ],
+              button: billing ? { label: "See your subscription", url: billing } : undefined,
             };
             break;
           case "subscription_ended":

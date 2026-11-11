@@ -1,8 +1,9 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { cookies } from "next/headers";
-import { config, dodoEnabled, nowSql } from "./config";
+import { config, dodoEnabled, nowSql, serverToday } from "./config";
 import { db } from "./db";
+import { endFreeAccess, trialOffer } from "./billing";
 import { ApiError } from "./http";
 
 const scrypt = promisify(scryptCallback) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
@@ -131,11 +132,14 @@ async function accessDisabled() {
  * The admin may sign in, but only to pay.
  */
 async function subscriptionEnded(villaId: string) {
-  const villa = await db.one<{ monthly_subscription_amount: number; disabled_reason: string | null }>("SELECT monthly_subscription_amount, disabled_reason FROM villas WHERE id = ?", [villaId]);
+  const villa = await db.one<{ monthly_subscription_amount: number; disabled_reason: string | null; dodo_subscription_id: string | null; trial_days: number | null; trial_ends_on: string | null }>(
+    "SELECT monthly_subscription_amount, disabled_reason, dodo_subscription_id, trial_days, trial_ends_on FROM villas WHERE id = ?",
+    [villaId],
+  );
   const firstPayment = villa?.disabled_reason === "unpaid";
   return new ApiError(403, "subscription_ended", firstPayment ? "Your subscription has not started yet." : "Your subscription has ended.", {
     support: await supportContact(),
-    renewal: { monthlyAmount: villa?.monthly_subscription_amount ?? 0, canPay: dodoEnabled(), firstPayment },
+    renewal: { monthlyAmount: villa?.monthly_subscription_amount ?? 0, canPay: dodoEnabled(), firstPayment, trialDays: villa ? await trialOffer(villa) : 0 },
   });
 }
 
@@ -165,8 +169,13 @@ export async function requireVillaAdmin(
   if (!user.emailVerified && !opts.allowUnverified && (await verificationRequired())) {
     throw new ApiError(403, "email_unverified", "Please verify your email address first.", { email: user.email, support: await supportContact() });
   }
-  const villa = await db.one<VillaAccessRow>("SELECT account_status, disabled_reason FROM villas WHERE id = ?", [user.villaId]);
+  let villa = await db.one<VillaAccessRow & { free_until: string | null }>("SELECT account_status, disabled_reason, free_until FROM villas WHERE id = ?", [user.villaId]);
   if (!villa) throw await accessDisabled();
+  // Free access from the Super Admin that ran out since the daily job last ran.
+  if (villa.free_until && villa.free_until < serverToday()) {
+    await endFreeAccess(user.villaId, "expired");
+    villa = (await db.one<VillaAccessRow & { free_until: string | null }>("SELECT account_status, disabled_reason, free_until FROM villas WHERE id = ?", [user.villaId]))!;
+  }
   if (lapsed(villa)) {
     const unpaid = villa.disabled_reason === "unpaid";
     // Only the payment routes accept a villa whose subscription ended.

@@ -310,6 +310,15 @@ const ADDED_COLUMNS: [table: string, column: string, ddl: string][] = [
   // The owner's choice to get last month's report by email on the 1st, and an extra address for it.
   ["villas", "monthly_report", "TINYINT(1) NOT NULL DEFAULT 0"],
   ["villas", "report_cc", "VARCHAR(190) NULL"],
+  // Free trial: the days a self sign-up was offered when it registered, and when its trial ends (set once the card is added).
+  ["villas", "trial_days", "SMALLINT NULL"],
+  ["villas", "trial_ends_on", "DATE NULL"],
+  // The day the trial-ending reminder went out, so it is sent once.
+  ["villas", "trial_reminder_sent", "DATE NULL"],
+  // Free access the Super Admin gave without a card: the last free day. The villa switches off after it.
+  ["villas", "free_until", "DATE NULL"],
+  // The card subscription is set to end at the end of the paid month (by the owner in Dodo, or the Super Admin).
+  ["villas", "cancel_at_period_end", "TINYINT(1) NOT NULL DEFAULT 0"],
 ];
 
 const ADDED_INDEXES: [table: string, name: string, ddl: string][] = [

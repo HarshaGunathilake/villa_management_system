@@ -10,6 +10,6 @@ import { loadVillaData, loadVillaSubscription } from "@/lib/server/tenant";
 export const GET = route(async () => {
   const { user, villaId, unpaid } = await requireVillaAdmin({ allowUnpaid: true });
   const [data, subscription] = await Promise.all([loadVillaData(villaId, user.name, user.email), loadVillaSubscription(villaId)]);
-  const firstPayment = unpaid ? { monthlyAmount: subscription.monthlyAmount, canPay: dodoEnabled(), firstPayment: true } : null;
+  const firstPayment = unpaid ? { monthlyAmount: subscription.monthlyAmount, canPay: dodoEnabled(), firstPayment: true, trialDays: subscription.trialOffer } : null;
   return { ok: true, user: { name: user.name, email: user.email }, data, subscription, tour: user.tourPending, firstPayment };
 });

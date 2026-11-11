@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { VillaStrip } from "@/components/villa-strip";
 import { bookingPhase, coversNight, guestCount, isActive, roomNight } from "@/lib/availability";
 import { billsDueSoon, billsToPay, dueSoonText, type BillDue } from "@/lib/bills";
-import { fmtDay, fmtLong, fmtMonthLong, monthKey, nightsBetween } from "@/lib/dates";
+import { fmtDay, fmtFull, fmtLong, fmtMonthLong, monthKey, nightsBetween } from "@/lib/dates";
 import { monthSummary } from "@/lib/finance";
 import { PHOTOS } from "@/lib/photos";
 import { useLookups, useStore } from "@/lib/store";
@@ -22,6 +22,15 @@ import { money, plural } from "@/lib/utils";
 /** A short line for the top of the home screen when the subscription needs attention, otherwise nothing. */
 function subscriptionNotice(s: VillaSubscription, today: string) {
   const days = nightsBetween(today, s.nextPaymentDate);
+  if (s.freeUntil) {
+    const left = nightsBetween(today, s.freeUntil) + 1;
+    return left <= 7 ? `Your free access ends ${left <= 1 ? "today" : `in ${left} days`}. Add your card to carry on:` : null;
+  }
+  if (s.endsAtPeriodEnd) return `Your subscription is cancelled and ends on ${fmtFull(s.nextPaymentDate)}.`;
+  if (s.trialEndsOn) {
+    const left = nightsBetween(today, s.trialEndsOn);
+    return left <= 7 ? `Your free trial ends ${left <= 1 ? "tomorrow" : `in ${left} days`}. First charge on ${fmtFull(s.trialEndsOn)}:` : null;
+  }
   if (s.status === "overdue") return "Your subscription payment is overdue.";
   if (s.status === "payment_due") return "Your subscription payment is due.";
   if (days < 0) return `Your subscription payment was due ${-days} ${-days === 1 ? "day" : "days"} ago.`;

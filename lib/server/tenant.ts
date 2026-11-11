@@ -23,7 +23,7 @@ import {
 import { billExpense, isBillPeriod } from "../bills";
 import { payslipExpense } from "../payroll";
 import { extrasTotal } from "../utils";
-import { loadBilling } from "./billing";
+import { loadBilling, trialOffer } from "./billing";
 import { nowSql, serverToday } from "./config";
 import { db, transaction, type Db } from "./db";
 import { ApiError, badRequest, clockTime, integer, isoDate, notFound, oneOf, recordId, text } from "./http";
@@ -214,8 +214,13 @@ export async function loadVillaData(villaId: string, userName: string, userEmail
  * and who recorded each payment stay with the Super Admin.
  */
 export async function loadVillaSubscription(villaId: string): Promise<VillaSubscription> {
-  const villa = await db.one<{ plan: string; monthly_subscription_amount: number; subscription_status: VillaSubscription["status"]; subscription_start_date: string; next_payment_date: string }>(
-    "SELECT plan, monthly_subscription_amount, subscription_status, subscription_start_date, next_payment_date FROM villas WHERE id = ?",
+  const villa = await db.one<{
+    plan: string; monthly_subscription_amount: number; subscription_status: VillaSubscription["status"]; subscription_start_date: string; next_payment_date: string;
+    disabled_reason: string | null; dodo_subscription_id: string | null; dodo_status: string | null; trial_days: number | null; trial_ends_on: string | null;
+    free_until: string | null; cancel_at_period_end: number;
+  }>(
+    `SELECT plan, monthly_subscription_amount, subscription_status, subscription_start_date, next_payment_date,
+            disabled_reason, dodo_subscription_id, dodo_status, trial_days, trial_ends_on, free_until, cancel_at_period_end FROM villas WHERE id = ?`,
     [villaId],
   );
   if (!villa) throw notFound("Villa");
@@ -236,6 +241,10 @@ export async function loadVillaSubscription(villaId: string): Promise<VillaSubsc
     payments: payments.map((p) => ({ id: p.id, amount: p.amount, paymentDate: p.payment_date, periodStart: p.period_start, periodEnd: p.period_end, note: p.note })),
     billing: await loadBilling(villaId),
     support: { email: setting("supportEmail"), phone: setting("supportPhone") },
+    trialEndsOn: villa.trial_ends_on && villa.trial_ends_on > serverToday() && villa.dodo_status === "active" ? villa.trial_ends_on : null,
+    trialOffer: await trialOffer(villa),
+    freeUntil: villa.free_until,
+    endsAtPeriodEnd: !!villa.cancel_at_period_end && villa.dodo_status !== null && ["active", "on_hold", "past_due", "paused"].includes(villa.dodo_status),
   };
 }
 

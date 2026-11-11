@@ -131,8 +131,12 @@ export function SubscriptionEnded({
         </span>
         {renewal?.firstPayment ? (
           <>
-            <h1 className="mt-6 text-[1.875rem] leading-tight font-semibold sm:text-4xl">Start your subscription</h1>
-            <p className="mt-3 text-lg text-muted">Your account is ready. Make your first payment and your villa opens straight away, with bookings, guests and expenses in one place.</p>
+            <h1 className="mt-6 text-[1.875rem] leading-tight font-semibold sm:text-4xl">{renewal.trialDays ? `Start your ${renewal.trialDays}-day free trial` : "Start your subscription"}</h1>
+            <p className="mt-3 text-lg text-muted">
+              {renewal.trialDays
+                ? "Your account is ready. Add your card and your villa opens straight away. Nothing is charged until the trial ends."
+                : "Your account is ready. Make your first payment and your villa opens straight away, with bookings, guests and expenses in one place."}
+            </p>
           </>
         ) : (
           <>
@@ -153,7 +157,11 @@ export function SubscriptionEnded({
             <div className="tnum text-2xl font-semibold">
               {money(renewal.monthlyAmount)} <span className="text-base font-normal text-muted">a month, by card</span>
             </div>
-            <p className="mt-1 text-sm text-muted">Charged every month until you cancel. Payments are handled by Dodo Payments.</p>
+            <p className="mt-1 text-sm text-muted">
+              {renewal.firstPayment && renewal.trialDays
+                ? `Free for the first ${renewal.trialDays} days, then charged every month until you cancel. Payments are handled by Dodo Payments.`
+                : "Charged every month until you cancel. Payments are handled by Dodo Payments."}
+            </p>
           </div>
         ) : (
           <p className="mt-4 text-lg text-muted">Card payments are not available right now. Please contact the platform administrator.</p>
@@ -168,7 +176,7 @@ export function SubscriptionEnded({
         <div className="mt-6 grid gap-3">
           {renewal?.canPay ? (
             <Button size="lg" onClick={pay} disabled={busy}>
-              {busy ? <Loader2 className="animate-spin" /> : <CreditCard />} Pay {money(renewal.monthlyAmount)} by card
+              {busy ? <Loader2 className="animate-spin" /> : <CreditCard />} {renewal.firstPayment && renewal.trialDays ? "Add card and start free trial" : `Pay ${money(renewal.monthlyAmount)} by card`}
             </Button>
           ) : null}
           {confirming ? (

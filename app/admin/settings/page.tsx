@@ -77,13 +77,16 @@ export default function AdminSettingsPage() {
     notify("Password changed");
   };
 
-  const canSave = (dirty || offPrice > 0) && draft.platformName.trim().length >= 2 && draft.defaultMonthlyAmount >= 1;
+  const trialOk = Number.isInteger(draft.trialDays) && draft.trialDays >= 0 && draft.trialDays <= 365;
+  const canSave = (dirty || offPrice > 0) && draft.platformName.trim().length >= 2 && draft.defaultMonthlyAmount >= 1 && trialOk;
   const current_ = TABS.find((t) => t.id === tab)!;
   // A small dot on a tab with unsaved changes, so switching tabs never hides them.
   const unsaved: Partial<Record<Tab, boolean>> = {
     general: draft.platformName !== settings.platformName || draft.supportEmail !== settings.supportEmail || draft.supportPhone !== settings.supportPhone,
     subscription:
-      draft.defaultMonthlyAmount !== settings.defaultMonthlyAmount || draft.signupsOpen !== settings.signupsOpen || draft.requireEmailVerification !== settings.requireEmailVerification,
+      draft.defaultMonthlyAmount !== settings.defaultMonthlyAmount ||
+      draft.trialDays !== settings.trialDays ||
+      draft.signupsOpen !== settings.signupsOpen || draft.requireEmailVerification !== settings.requireEmailVerification,
   };
   const saveRow = (
     <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">
@@ -169,6 +172,30 @@ export default function AdminSettingsPage() {
                   {offPrice} {offPrice === 1 ? "villa is" : "villas are"} still on a different price. Save to move {offPrice === 1 ? "it" : "them"} to {money(settings.defaultMonthlyAmount)}.
                 </p>
               ) : null}
+              <Field
+                label="Free trial for new sign-ups"
+                hint={
+                  draft.trialDays > 0
+                    ? `New owners add their card at sign-up and use everything free for ${draft.trialDays} ${draft.trialDays === 1 ? "day" : "days"}. The first charge is at the end of the trial, unless they cancel. Owners who already signed up keep the trial they were offered.`
+                    : "Off: new owners pay the first month when they add their card. Owners who already signed up keep the trial they were offered."
+                }
+              >
+                {(id) => (
+                  <div className="flex items-center gap-3">
+                    <Input
+                      id={id}
+                      inputMode="numeric"
+                      className="w-28 tnum"
+                      value={Number.isNaN(draft.trialDays) ? "" : String(draft.trialDays)}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^0-9]/g, "");
+                        setDraft({ ...draft, trialDays: v === "" ? Number.NaN : Math.min(365, Number(v)) });
+                      }}
+                    />
+                    <span className="text-muted">days (0 for no trial)</span>
+                  </div>
+                )}
+              </Field>
               <div className="divide-y divide-line rounded-xl border border-line">
                 <label className="flex cursor-pointer items-start gap-3 px-4 py-3.5">
                   <input
@@ -179,7 +206,7 @@ export default function AdminSettingsPage() {
                   />
                   <span>
                     <span className="font-medium">Anyone can sign up</span>
-                    <span className="block text-sm text-muted">New villa owners can register themselves. Their villa stays locked until the first card payment goes through.</span>
+                    <span className="block text-sm text-muted">New villa owners can register themselves. Their villa stays locked until they add their card (and, without a free trial, the first payment goes through).</span>
                   </span>
                 </label>
                 <label className="flex cursor-pointer items-start gap-3 px-4 py-3.5">

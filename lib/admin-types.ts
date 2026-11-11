@@ -23,6 +23,12 @@ export interface AdminVilla {
   disabledReason: "manual" | "subscription" | "unpaid" | null;
   /** The villa's card subscription with Dodo Payments, if any */
   card: { status: string | null; subscriptionId: string | null; customerId: string | null };
+  /** On a free trial until this date (the first card charge); null when not on a trial */
+  trialEndsOn: string | null;
+  /** Free access you gave without a card: the last free day; null when none */
+  freeUntil: string | null;
+  /** The card subscription ends at the end of the paid month (no more charges) */
+  cancelAtPeriodEnd: boolean;
   /** Created its own account on the Register page, rather than being added by the Super Admin */
   signedUp: boolean;
   /** Read-only figures from the villa's own data */
@@ -70,6 +76,8 @@ export interface PlatformSettings {
   supportPhone: string;
   /** The one subscription price every villa pays */
   defaultMonthlyAmount: number;
+  /** Days new sign-ups get free before the first card charge (0 = no trial). They still add a card at sign-up. */
+  trialDays: number;
   /** Anyone can create a villa account from the Register page */
   signupsOpen: boolean;
   /** Search engines may index the public website */
@@ -114,10 +122,10 @@ export interface MailSettings {
   fromName: string;
   fromEmail: string;
   /** Which automatic emails go out */
-  emails: { welcome: boolean; paymentReceived: boolean; paymentFailed: boolean; subscriptionEnded: boolean };
+  emails: { welcome: boolean; trial: boolean; paymentReceived: boolean; paymentFailed: boolean; subscriptionEnded: boolean };
 }
 
-export type EmailKind = "test" | "contact" | "password_reset" | "verify_email" | "welcome" | "payment_received" | "payment_failed" | "subscription_ended" | "monthly_report";
+export type EmailKind = "test" | "contact" | "password_reset" | "verify_email" | "welcome" | "payment_received" | "payment_failed" | "subscription_ended" | "trial_started" | "trial_ending" | "monthly_report";
 
 export interface EmailLogEntry {
   id: number;

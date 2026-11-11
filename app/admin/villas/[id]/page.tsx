@@ -5,7 +5,8 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeft, Mail, MailCheck, MailWarning, MapPin, Phone, Plus } from "lucide-react";
 import { ActivityList } from "@/components/admin/activity-list";
-import { AccessBadge, AdminCard, CardBadge, fmtDate, fmtStamp, FormError, relativeDay, StatTile, SubscriptionBadge, TabBar, VillaAccessBadge, VillaStatusBadge } from "@/components/admin/ui";
+import { AccessBadge, AdminCard, CardBadge, fmtDate, fmtStamp, FormError, relativeDay, StatTile, SubscriptionBadge, TabBar, TrialBadge, VillaAccessBadge, VillaStatusBadge, FreeBadge, EndingBadge } from "@/components/admin/ui";
+import { SubscriptionActions, SubscriptionNote } from "@/components/admin/subscription-actions";
 import { AccessModal, AdminStatusModal, AdminUserModal } from "@/components/admin/villa-forms";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -237,11 +238,14 @@ function Subscription({ villa, onAccess }: { villa: AdminVilla; onAccess: () => 
           {row("Monthly amount", money(villa.monthlyAmount))}
           {row("Started", fmtDate(villa.subscriptionStartDate))}
           {row("Current period", `${fmtDate(period.start)} to ${fmtDate(period.end)}`)}
-          {row("Paid until", late ? <span className="text-amber-deep">{fmtDate(addDays(villa.nextPaymentDate, -1))}, this period is not paid yet</span> : fmtDate(addDays(villa.nextPaymentDate, -1)))}
-          {row("Next payment due", <>{fmtDate(villa.nextPaymentDate)} <span className="font-normal text-muted">({relativeDay(today, villa.nextPaymentDate)})</span></>)}
+          {villa.trialEndsOn ? row("Free trial", <TrialBadge until={villa.trialEndsOn} />) : null}
+          {villa.trialEndsOn ? null : row("Paid until", late ? <span className="text-amber-deep">{fmtDate(addDays(villa.nextPaymentDate, -1))}, this period is not paid yet</span> : fmtDate(addDays(villa.nextPaymentDate, -1)))}
+          {row(villa.trialEndsOn ? "First card charge" : "Next payment due", <>{fmtDate(villa.nextPaymentDate)} <span className="font-normal text-muted">({relativeDay(today, villa.nextPaymentDate)})</span></>)}
           {row("Subscription status", <SubscriptionBadge status={villa.subscriptionStatus} />)}
           {row("Card payments", <CardBadge status={villa.card.status} />)}
           {row("Account access", <VillaAccessBadge villa={villa} />)}
+          {villa.freeUntil ? row("Free access", <FreeBadge until={villa.freeUntil} />) : null}
+          {villa.cancelAtPeriodEnd ? row("Cancelled", <EndingBadge on={villa.nextPaymentDate} />) : null}
           {villa.card.subscriptionId ? row("Dodo subscription", <span className="font-mono text-sm break-all">{villa.card.subscriptionId}</span>) : null}
         </dl>
         <p className="mt-3 text-sm text-muted">
@@ -249,6 +253,12 @@ function Subscription({ villa, onAccess }: { villa: AdminVilla; onAccess: () => 
           you), the villa admin can still see everything but cannot add or change anything until it is paid. When a card subscription is cancelled or expires, access
           switches off by itself and comes back when the villa pays again. A villa you disable stays off until you enable it.
         </p>
+        <div className="mt-4 space-y-3 border-t border-line pt-4">
+          <SubscriptionNote villa={villa} />
+          <div className="flex flex-wrap gap-2">
+            <SubscriptionActions villa={villa} />
+          </div>
+        </div>
 
         <FormError message={error} />
         <div className="mt-4 grid gap-2">

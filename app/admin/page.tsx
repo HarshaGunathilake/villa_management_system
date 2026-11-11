@@ -31,7 +31,8 @@ export default function AdminDashboard() {
   const { villas, admins, payments, today, settings, me } = useAdminData();
   const [creating, setCreating] = useState(false);
 
-  const paying = villas.filter((v) => v.card.status === "active" && v.accountStatus === "active");
+  // On a free trial: the card is saved but nothing has been charged yet, so not counted as paying.
+  const paying = villas.filter((v) => v.card.status === "active" && v.accountStatus === "active" && !v.trialEndsOn);
   const recurring = paying.reduce((sum, v) => sum + v.monthlyAmount, 0);
   const weekAhead = addDays(today, 7);
   const renewing = paying.filter((v) => v.nextPaymentDate >= today && v.nextPaymentDate <= weekAhead);

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock3, CreditCard, Loader2, Lock, Mail, Phone } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, CreditCard, Gift, Loader2, Lock, Mail, Phone } from "lucide-react";
 import { Card } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,16 @@ const dayWord = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
 /** The one thing the admin most needs to know about their subscription right now, or nothing. */
 export function subscriptionHeadline(s: VillaSubscription, today: string) {
   const days = nightsBetween(today, s.nextPaymentDate);
+  if (s.trialOffer > 0) return null;
+  if (s.freeUntil) {
+    const left = nightsBetween(today, s.freeUntil) + 1;
+    return left <= 7 ? `Your free access ends ${left <= 1 ? "today" : `in ${dayWord(left)}`}. Add your card to carry on.` : null;
+  }
+  if (s.endsAtPeriodEnd) return `Your subscription is cancelled. You can use everything until ${fmtFull(addDays(s.nextPaymentDate, -1))}.`;
+  if (s.trialEndsOn) {
+    const left = nightsBetween(today, s.trialEndsOn);
+    return left <= 7 ? `Your free trial ends ${left <= 1 ? "tomorrow" : `in ${dayWord(left)}`}. The first charge is on ${fmtFull(s.trialEndsOn)}.` : null;
+  }
   if (s.status === "overdue") return `Payment is overdue${days < 0 ? `, it was due ${dayWord(-days)} ago` : ""}`;
   if (s.status === "payment_due") return `Payment is due${days < 0 ? `, ${dayWord(-days)} late` : ""}`;
   if (days < 0) return `Payment was due ${dayWord(-days)} ago`;
@@ -54,15 +64,48 @@ export function SubscriptionSummary({ subscription: s, today }: { subscription: 
             {money(s.monthlyAmount)} <span className="text-base font-normal text-muted">a month</span>
           </div>
         </div>
-        <SubscriptionStatusBadge status={s.status} />
+        {s.freeUntil ? (
+          <Badge tone="sage" icon={Gift}>
+            Free access
+          </Badge>
+        ) : s.endsAtPeriodEnd ? (
+          <Badge tone="amber" icon={Clock3}>
+            Cancelled
+          </Badge>
+        ) : s.trialEndsOn || s.trialOffer > 0 ? (
+          <Badge tone="dusk" icon={Gift}>
+            {s.trialEndsOn ? "Free trial" : "Free trial not started"}
+          </Badge>
+        ) : (
+          <SubscriptionStatusBadge status={s.status} />
+        )}
       </div>
       {headline ? (
-        <p className={`mt-3 rounded-xl px-3.5 py-2.5 text-[0.9375rem] font-medium ${s.status === "overdue" ? "bg-clay-soft text-clay" : "bg-amber-soft text-amber-deep"}`}>{headline}</p>
+        <p
+          className={`mt-3 rounded-xl px-3.5 py-2.5 text-[0.9375rem] font-medium ${s.trialEndsOn || s.freeUntil ? "bg-dusk-soft text-dusk" : s.status === "overdue" ? "bg-clay-soft text-clay" : "bg-amber-soft text-amber-deep"}`}
+        >
+          {headline}
+        </p>
       ) : null}
       <dl className="mt-3 border-t border-line pt-2">
-        {row("Next payment due", fmtFull(s.nextPaymentDate))}
-        {row("Paid until", fmtFull(addDays(s.nextPaymentDate, -1)))}
-        {row("Subscribed since", fmtFull(s.startDate))}
+        {s.freeUntil ? (
+          row("Free until", fmtFull(s.freeUntil))
+        ) : s.endsAtPeriodEnd ? (
+          row("Access until", fmtFull(addDays(s.nextPaymentDate, -1)))
+        ) : s.trialOffer > 0 ? (
+          row("Free trial", dayWord(s.trialOffer))
+        ) : s.trialEndsOn ? (
+          <>
+            {row("Free until", fmtFull(addDays(s.trialEndsOn, -1)))}
+            {row("First charge", fmtFull(s.trialEndsOn))}
+          </>
+        ) : (
+          <>
+            {row("Next payment due", fmtFull(s.nextPaymentDate))}
+            {row("Paid until", fmtFull(addDays(s.nextPaymentDate, -1)))}
+          </>
+        )}
+        {s.trialOffer > 0 ? null : row("Subscribed since", fmtFull(s.startDate))}
       </dl>
     </div>
   );
@@ -199,6 +242,49 @@ export function PaymentPanel({ subscription: s, onRefresh }: { subscription: Vil
 
   if (!b.enabled) {
     body = <p className="text-muted">Card payments are not set up yet. Please contact the platform administrator.</p>;
+  } else if (s.freeUntil && b.state !== "active") {
+    body = (
+      <>
+        <p className="flex items-start gap-2 font-medium text-sage-deep">
+          <Gift className="mt-0.5 size-5 shrink-0" aria-hidden /> Free access until {fmtFull(s.freeUntil)}
+        </p>
+        <p className="mt-1 text-muted">
+          No card needed until then. To carry on after that, add your card any time: nothing is charged until {fmtFull(addDays(s.freeUntil, 1))}, then {money(s.monthlyAmount)} a month.
+        </p>
+        <Button variant="secondary" size="lg" block className="mt-4" disabled={busy || confirming} onClick={() => go("checkout")}>
+          {spinner} Add card
+        </Button>
+      </>
+    );
+  } else if (b.state === "active" && s.endsAtPeriodEnd) {
+    body = (
+      <>
+        <p className="flex items-start gap-2 font-medium text-amber-deep">
+          <Clock3 className="mt-0.5 size-5 shrink-0" aria-hidden /> Subscription cancelled
+        </p>
+        <p className="mt-1 text-muted">
+          You won&apos;t be charged again. You can use everything until {fmtFull(addDays(s.nextPaymentDate, -1))}. To keep your subscription, contact us or open Manage card and billing.
+        </p>
+        <Button variant="secondary" size="lg" block className="mt-4" disabled={busy} onClick={() => go("portal")}>
+          {spinner} Manage card and billing
+        </Button>
+      </>
+    );
+  } else if (b.state === "active" && s.trialEndsOn) {
+    body = (
+      <>
+        <p className="flex items-start gap-2 font-medium text-sage-deep">
+          <CheckCircle2 className="mt-0.5 size-5 shrink-0" aria-hidden /> Card saved, free trial running
+        </p>
+        <p className="mt-1 text-muted">
+          Nothing is charged until {fmtFull(s.trialEndsOn)}. Then {money(s.monthlyAmount)} is charged every month. To stop before then, cancel in Manage card and billing and you won&apos;t be
+          charged.
+        </p>
+        <Button variant="secondary" size="lg" block className="mt-4" disabled={busy} onClick={() => go("portal")}>
+          {spinner} Manage card and billing
+        </Button>
+      </>
+    );
   } else if (b.state === "active") {
     body = (
       <>
@@ -232,11 +318,13 @@ export function PaymentPanel({ subscription: s, onRefresh }: { subscription: Vil
     body = (
       <>
         <p className="text-muted">
-          Pay {money(s.monthlyAmount)} a month by card. You are charged now, then every month until you cancel.
-          {b.state === "pending" ? " You started a payment earlier that was not finished." : ""}
+          {s.trialOffer > 0
+            ? `Add your card to start your ${s.trialOffer}-day free trial. Nothing is charged today. Then ${money(s.monthlyAmount)} a month, until you cancel.`
+            : `Pay ${money(s.monthlyAmount)} a month by card. You are charged now, then every month until you cancel.`}
+          {b.state === "pending" ? (s.trialOffer > 0 ? " You started adding a card earlier but did not finish." : " You started a payment earlier that was not finished.") : ""}
         </p>
         <Button size="lg" block className="mt-4" disabled={busy || confirming} onClick={() => go("checkout")}>
-          {spinner} {b.state === "pending" ? "Continue to payment" : "Pay by card"}
+          {spinner} {b.state === "pending" ? "Continue" : s.trialOffer > 0 ? "Add card and start free trial" : "Pay by card"}
         </Button>
       </>
     );
@@ -247,7 +335,7 @@ export function PaymentPanel({ subscription: s, onRefresh }: { subscription: Vil
       <h2 className="mb-2 text-lg font-semibold">Payment</h2>
       {confirming ? (
         <p role="status" className="mb-3 flex items-center gap-2 rounded-xl bg-sage-soft px-3.5 py-2.5 font-medium text-sage-deep">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> Confirming your payment…
+          <Loader2 className="size-4 animate-spin" aria-hidden /> {s.trialOffer > 0 ? "Confirming your card…" : "Confirming your payment…"}
         </p>
       ) : null}
       {body}
